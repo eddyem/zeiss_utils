@@ -37,6 +37,18 @@ typedef enum{
     ESW_BOTH_ACTIVE = 3
 } eswstate;
 
+// system state
+typedef enum{
+    // non-blocking statuses:
+    STAT_OK,        // all OK
+    // blocking statuses:
+    STAT_ESW,       // end-switch active
+    STAT_BADESW,    // wrong end-switch active
+    STAT_BOTHESW,   // both end-switches active
+    STAT_GOFROMESW, // mowing from end-switch
+    STAT_ERROR      // uncoverable error
+} sysstatus;
+
 int init_encoder(int encnode, int reset);
 void returnPreOper();
 int getPos(double *pos);
@@ -49,5 +61,6 @@ int move2pos(double target);
 int stop();
 int movewconstspeed(int spd);
 int go_out_from_ESW();
+sysstatus get_status();
 
 #endif // CAN_ENCODER_H__

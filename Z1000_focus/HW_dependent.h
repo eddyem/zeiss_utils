@@ -55,6 +55,9 @@
 // minimal & maximal focus positions (should be >min+dF0 & <max-dF0)
 #define FOCMIN              200
 #define FOCMAX              320000
+// focus raw positions @ endswitches (< or >)
+#define FOCPOS_CW_ESW       5000
+#define FOCPOS_CCW_ESW      315000
 // the same in mm
 #define FOCMIN_MM           0.1
 #define FOCMAX_MM           76.0

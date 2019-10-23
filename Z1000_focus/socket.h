@@ -36,11 +36,21 @@
 #define S_CMD_FOCUS     "focus"
 #define S_CMD_TARGSPEED "targspeed"
 #define S_CMD_GOTO      "goto"
+#define S_CMD_STATUS    "status"
 
 // answers through the socket
 #define S_ANS_ERR       "error"
 #define S_ANS_OK        "OK"
 #define S_ANS_MOVING    "moving"
+
+// statuses
+#define S_STATUS_OK         "OK"
+#define S_STATUS_ESW        "End-switch active"
+#define S_STATUS_ERROR      "Uncoverable error"
+#define S_STATUS_BOTHESW    "Both end-switches active"
+#define S_STATUS_BADESW     "Wrong end-switch active"
+#define S_STATUS_ESW        "End-switch active"
+#define S_STATUS_GOFROMESW  "Moving from end-switch"
 
 bool emerg_stop;
 

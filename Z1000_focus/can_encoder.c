@@ -35,10 +35,29 @@ static unsigned long motor_id = 0, motor_p_id = 0;//, bcast_id = 1;
 static unsigned long curposition = 0;
 // encoder's node number
 static int encnodenum = 0;
-
+// system status
+static sysstatus curstatus = STAT_OK;
 static canstatus can_write_par(uint8_t subidx, uint16_t idx, uint32_t *parval);
 static canstatus can_read_par(uint8_t subidx, uint16_t idx, uint32_t *parval);
 static int move(unsigned long targposition, int16_t rawspeed);
+
+// return 0 if all OK
+static int chk_eswstates(){
+    uint32_t cw, ccw;
+    if(CAN_NOERR != can_read_par(PAR_DI_SUBIDX, PAR_CW_IDX, &cw)) goto verybad;
+    if(CAN_NOERR != can_read_par(PAR_DI_SUBIDX, PAR_CCW_IDX, &ccw)) goto verybad;
+    uint32_t parval = DI_ENSTOP;
+    if(cw != DI_ENSTOP || ccw != DI_ENSTOP){ // activate enable/stop
+        WARNX("\n\nThe end-switches state wasn't default!");
+        if(CAN_NOERR != can_write_par(PAR_DI_SUBIDX, PAR_CW_IDX, &parval)) goto verybad;
+        if(CAN_NOERR != can_write_par(PAR_DI_SUBIDX, PAR_CCW_IDX, &parval)) goto verybad;
+    }
+    return 0;
+verybad:
+    WARNX("Can't return esw to default state");
+    curstatus = STAT_ERROR;
+    return 1;
+}
 
 /**
  * @brief init_encoder - encoder's interface initialisation
@@ -107,6 +126,7 @@ int init_encoder(int encnode, int reset){
         else for(i=0;i<n;i++)
             verbose("Node%d PDO%d %08lx (%ld)\n",node[i],pdo_n[i],pdo_v[i],pdo_v[n]);
     }while(0);
+    curstatus = STAT_OK;
     return 0;
 }
 
@@ -132,12 +152,15 @@ int go_out_from_ESW(){
     }
     if(e == ESW_BOTH_ACTIVE){ // error situation!
         WARNX("Error: both end-switches are active!");
+        curstatus = STAT_BOTHESW;
         return 1;
     }
     if(e == ESW_INACTIVE){
         DBG("Esw inactive");
+        curstatus = STAT_OK;
         return 0;
     }
+    curstatus = STAT_GOFROMESW;
     // try to move from esw
     parval = DI_NOFUNC;
     uint16_t idx = (e == ESW_CW_ACTIVE) ? PAR_CW_IDX : PAR_CCW_IDX;
@@ -147,7 +170,6 @@ int go_out_from_ESW(){
         getPos(NULL);
         DBG("try %d, pos: %lu, E=%d", i, curposition, e);
         unsigned long targ = (e == ESW_CW_ACTIVE) ? curposition - (double)FOCSCALE_MM*0.2 : curposition + (double)FOCSCALE_MM*0.2;
-
         if(move(targ, speed)) continue;
         get_endswitches(&e);
         if(e == ESW_INACTIVE) break;
@@ -158,11 +180,14 @@ int go_out_from_ESW(){
     if(CAN_NOERR != can_write_par(PAR_DI_SUBIDX, PAR_CCW_IDX, &parval)) goto bad;
     if(e != ESW_INACTIVE){
         WARNX("Can't move out of end-switch");
+        curstatus = STAT_ERROR;
         return 1;
     }
+    curstatus = STAT_OK;
     return 0;
 bad:
     WARNX("Can't get/set esw parameters");
+    curstatus = STAT_ERROR;
     return 1;
 }
 
@@ -193,6 +218,26 @@ int init_motor_ids(int addr){
 int getPos(double *pos){
     int r = !(getLong(encnodenum, DS406_POSITION_VAL, 0, &curposition));
     if(pos) *pos = FOC_RAW2MM(curposition);
+    eswstate e;
+    if(CAN_NOERR != get_endswitches(&e)){
+        WARNX("Can't read end-switches state");
+        curstatus = STAT_ERROR;
+    }else switch(e){
+        case ESW_BOTH_ACTIVE:
+            curstatus = STAT_BOTHESW;
+        break;
+        case ESW_CCW_ACTIVE:
+            if(curposition > FOCPOS_CCW_ESW) curstatus = STAT_BADESW;
+            else curstatus = STAT_ESW;
+        break;
+        case ESW_CW_ACTIVE:
+            if(curposition < FOCPOS_CW_ESW) curstatus = STAT_BADESW;
+            else curstatus = STAT_ESW;
+        break;
+        case ESW_INACTIVE:
+        default:
+            curstatus = STAT_OK;
+    }
     return r;
 }
 
@@ -433,6 +478,7 @@ int stop(){
  * @return 0 if all OK
  */
 int movewconstspeed(int spd){
+    if(chk_eswstates()) return 1;
     int16_t targspd = RAWSPEED(spd);
     unsigned char buf[8] = {0,};
     buf[1] = CW_ENABLE;
@@ -457,6 +503,7 @@ static int move(unsigned long targposition, int16_t rawspeed){
         verbose("Already at position\n");
         return 0;
     }
+    if(chk_eswstates()) return 1;
     unsigned char buf[6] = {0,};
     DBG("Start moving with speed %d", rawspeed);
     buf[1] = CW_ENABLE;
@@ -481,25 +528,35 @@ static int move(unsigned long targposition, int16_t rawspeed){
         can_dsleep(0.01);
         //uint16_t motstat;
         double speed;
-        eswstate esw;
         if(emerg_stop){ // emergency stop activated
             WARNX("Activated stop while moving");
             stop();
+            curstatus = STAT_OK;
             return 1;
         }
         if(get_motor_speed(&speed) != CAN_NOERR){ // WTF?
             WARNX("Unknown situation: can't get speed of moving motor");
             stop();
+            curstatus = STAT_ERROR;
             return 1;
         }
+        getPos(NULL);
+        if(curstatus != STAT_OK){
+            WARNX("Something bad with end-switches");
+            stop();
+            return 1;
+        }
+        /* eswstate esw;
         if(get_endswitches(&esw) != CAN_NOERR){
             WARNX("Can't get endswitches state, stopping");
             stop();
+            curstatus = STAT_ERROR;
             return 1;
         }
         if(esw != ESW_INACTIVE){ // OOps, something wrong
             if(esw == ESW_BOTH_ACTIVE){ // error!
                 WARNX("Check end-switches, both active!");
+                curstatus = STAT_BOTHESW;
                 stop();
                 return 1;
             }
@@ -507,20 +564,23 @@ static int move(unsigned long targposition, int16_t rawspeed){
             if(rawspeed > 0){ // moving CW, don't care for CCW esw state
                 if(esw == ESW_CW_ACTIVE){
                     WARNX("CW mowing: end-switch!");
+                    curstatus = STAT_ESW;
                     stop();
                     return 1;
                 }
             }else{ // movig CCW
                 if(esw == ESW_CCW_ACTIVE){
                     WARNX("CCW mowing: end-switch!");
+                    curstatus = STAT_ESW;
                     stop();
                     return 1;
                 }
             }
-        }
+        }*/
         if(fabs(speed) < 0.1){ // || (motstat & (SW_B_UNBLOCK|SW_B_READY|SW_B_POUNBLOCK)) != (SW_B_UNBLOCK|SW_B_READY|SW_B_POUNBLOCK)){
             if(++zerctr == 10){
                 WARNX("Motor stopped while moving!");
+                curstatus = STAT_ERROR;
                 stop();
                 return 1;
             }
@@ -538,6 +598,7 @@ static int move(unsigned long targposition, int16_t rawspeed){
     if(i == MOVING_TIMEOUT){
         WARNX("Error: timeout, but motor still not @ position! STOP!");
         stop();
+        curstatus = STAT_ERROR;
         return 1;
     }
     DBG("end-> curpos: %ld, difference: %ld, tm=%g\n", curposition, targposition - curposition, can_dtime()-t0);
@@ -553,6 +614,7 @@ static int move(unsigned long targposition, int16_t rawspeed){
     if(abs(targposition - curposition) > RAWPOS_TOLERANCE)
         verbose("Current (%ld) position is too far from target (%ld)\n", curposition, targposition);
     DBG("stop-> curpos: %ld, difference: %ld, tm=%g\n", curposition, targposition - curposition, can_dtime()-t0);
+    curstatus = STAT_OK;
     return r;
 }
 
@@ -713,4 +775,8 @@ void movewithmon(double spd){
         can_dsleep(0.03);
     }
 #undef PRINT
+}
+
+sysstatus get_status(){
+    return curstatus;
 }

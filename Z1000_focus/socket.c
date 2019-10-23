@@ -193,7 +193,7 @@ static void *handle_socket(void *asock){
         // empty request == focus request
         if(strlen(found) < 1 || getparam(S_CMD_FOCUS)){
             DBG("position request");
-            snprintf(buff, BUFLEN, "%.3f", curPos());
+            snprintf(buff, BUFLEN, "%.03f", curPos());
         }else if(getparam(S_CMD_STOP)){
             DBG("Stop request");
             emerg_stop = TRUE;
@@ -226,6 +226,29 @@ static void *handle_socket(void *asock){
                 DBG("Move to position %g request", pos);
                 sprintf(buff, startmoving(pos));
             }
+        }else if(getparam(S_CMD_STATUS)){
+            const char *msg = S_STATUS_ERROR;
+            switch(get_status()){
+                case STAT_OK:
+                    msg = S_STATUS_OK;
+                break;
+                case STAT_BADESW:
+                    msg = S_STATUS_BADESW;
+                break;
+                case STAT_BOTHESW:
+                    msg = S_STATUS_BOTHESW;
+                break;
+                case STAT_ERROR:
+                    msg = S_STATUS_ERROR;
+                break;
+                case STAT_ESW:
+                    msg = S_STATUS_ESW;
+                break;
+                case STAT_GOFROMESW:
+                    msg = S_STATUS_GOFROMESW;
+                break;
+            }
+            sprintf(buff, msg);
         }else sprintf(buff, S_ANS_ERR);
         if(!send_data(sock, webquery, buff)){
             WARNX("can't send data, some error occured");
@@ -297,9 +320,16 @@ static void daemon_(int sock){
         }
         usleep(500000); // sleep a little or thread's won't be able to lock mutex
         // get current position
-        pthread_mutex_lock(&canbus_mutex);
-        getPos(NULL);
-        pthread_mutex_unlock(&canbus_mutex);
+        if(!pthread_mutex_trylock(&canbus_mutex)){
+            getPos(NULL);
+            if(get_status() != STAT_OK){
+                if(!pthread_mutex_trylock(&moving_mutex)){
+                    go_out_from_ESW();
+                    pthread_mutex_unlock(&moving_mutex);
+                }
+            }
+            pthread_mutex_unlock(&canbus_mutex);
+        }
     }while(1);
     putlog("daemon_(): UNREACHABLE CODE REACHED!");
 }
