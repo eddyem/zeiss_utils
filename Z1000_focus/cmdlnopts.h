@@ -31,7 +31,6 @@ typedef struct{
     int reset;              // reset encoder
     int verbose;            // more messages
     int motorID;            // motor address (from controller's settings)
-    int bcastID;            // broadcast motor address
     double gotopos;         // move focus to given position
     double targspeed;       // just rotate motor with given speed
     int stop;               // stop motor
@@ -42,6 +41,7 @@ typedef struct{
     char *port;             // port number for server or client
     char *host;             // host to connect (in client mode)
     int standalone;         // run standalone
+    char *pidfilename;      // name of PID-file
 } glob_pars;
 
 

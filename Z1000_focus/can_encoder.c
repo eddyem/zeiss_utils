@@ -31,24 +31,31 @@ extern int verbose(const char *fmt, ...);
 
 // CAN bus IDs: for motor's functions (PI ID [F=4] == PO ID[F=3] + 1) and parameters
 static unsigned long motor_id = 0, motor_p_id = 0;//, bcast_id = 1;
-// current motor position
+// current motor position (RAW)
 static unsigned long curposition = 0;
 // encoder's node number
 static int encnodenum = 0;
 // system status
 static sysstatus curstatus = STAT_OK;
+// current raw motor speed (without MOTOR_REVERSE)
+int16_t targspd = 0;
+
 static canstatus can_write_par(uint8_t subidx, uint16_t idx, uint32_t *parval);
 static canstatus can_read_par(uint8_t subidx, uint16_t idx, uint32_t *parval);
 static int move(unsigned long targposition, int16_t rawspeed);
+static int waitTillStop();
 
+// check if end-switches are in default state
 // return 0 if all OK
 static int chk_eswstates(){
+    FNAME();
     uint32_t cw, ccw;
     if(CAN_NOERR != can_read_par(PAR_DI_SUBIDX, PAR_CW_IDX, &cw)) goto verybad;
     if(CAN_NOERR != can_read_par(PAR_DI_SUBIDX, PAR_CCW_IDX, &ccw)) goto verybad;
     uint32_t parval = DI_ENSTOP;
     if(cw != DI_ENSTOP || ccw != DI_ENSTOP){ // activate enable/stop
-        WARNX("\n\nThe end-switches state wasn't default!");
+        WARNX("\nThe end-switches state wasn't default!");
+        if(waitTillStop()) return 1; // we can change motor parameters only in stopped state
         if(CAN_NOERR != can_write_par(PAR_DI_SUBIDX, PAR_CW_IDX, &parval)) goto verybad;
         if(CAN_NOERR != can_write_par(PAR_DI_SUBIDX, PAR_CCW_IDX, &parval)) goto verybad;
     }
@@ -57,6 +64,50 @@ verybad:
     WARNX("Can't return esw to default state");
     curstatus = STAT_ERROR;
     return 1;
+}
+
+/**
+ * @brief chkMove - check whether moving available
+ * @param spd - speed (used only its sign) before MOTOR_REVERSE!
+ * @return 0 if all OK
+ */
+static int chkMove(int spd){
+    //FNAME();
+    if(curstatus == STAT_DAMAGE){
+        WARNX("Try to move in damaged state");
+        return 1;
+    }
+    eswstate e;
+    if(CAN_NOERR != get_endswitches(&e)){
+        curstatus = STAT_ERROR;
+        return 1;
+    }
+    if(e == ESW_INACTIVE){
+        if(getPos(NULL)) return 1;
+        if(curposition <= FOCMIN && spd < 0){
+            WARNX("Try to move to the left of minimal position");
+            return 1;
+        }
+        if(curposition >= FOCMAX && spd > 0){
+            WARNX("Try to move to the right of maximal position");
+            return 1;
+        }
+        return 0;
+    }
+    if(e == ESW_BOTH_ACTIVE){
+        curstatus = STAT_DAMAGE;
+        return 1;
+    }
+    if(e == ESW_CCW_ACTIVE && spd < 0){
+        curstatus = STAT_ESW;
+        WARNX("Try to move over the CCW end-switch");
+        return 1;
+    }else if(e == ESW_CW_ACTIVE && spd > 0){
+        curstatus = STAT_ESW;
+        WARNX("Try to move over the CW end-switch");
+        return 1;
+    }
+    return 0;
 }
 
 /**
@@ -135,32 +186,41 @@ int init_encoder(int encnode, int reset){
  * @return 0 if all OK
  */
 int go_out_from_ESW(){
-    uint32_t cw, ccw, parval;
-    // check esw roles
-    if(CAN_NOERR != can_read_par(PAR_DI_SUBIDX, PAR_CW_IDX, &cw)) goto bad;
-    if(CAN_NOERR != can_read_par(PAR_DI_SUBIDX, PAR_CCW_IDX, &ccw)) goto bad;
-    parval = DI_ENSTOP;
-    if(cw != DI_ENSTOP || ccw != DI_ENSTOP){ // activate enable/stop
-        if(CAN_NOERR != can_write_par(PAR_DI_SUBIDX, PAR_CW_IDX, &parval)) goto bad;
-        if(CAN_NOERR != can_write_par(PAR_DI_SUBIDX, PAR_CCW_IDX, &parval)) goto bad;
-    }
+    FNAME();
+    uint32_t parval;
+    if(chk_eswstates()) return 1;
     // check esw
     eswstate e;
+    getPos(NULL);
     if(CAN_NOERR != get_endswitches(&e)){
-        WARNX("Can't read end-switches state");
         return 1;
     }
     if(e == ESW_BOTH_ACTIVE){ // error situation!
         WARNX("Error: both end-switches are active!");
-        curstatus = STAT_BOTHESW;
+        curstatus = STAT_DAMAGE;
         return 1;
     }
     if(e == ESW_INACTIVE){
         DBG("Esw inactive");
+        int r = 0;
+        if(curposition < FOCMIN) r = move(FOCMIN, MAXSPEED);
+        else if(curposition > FOCMAX) r = move(FOCMAX, -MAXSPEED);
         curstatus = STAT_OK;
-        return 0;
+        return r;
     }
     curstatus = STAT_GOFROMESW;
+    // check that current position is in available zone
+    if(e == ESW_CW_ACTIVE && curposition < FOCPOS_CW_ESW){
+        // WTF? CW end-switch activated in forbidden zone!
+        WARNX("CW end-switch in forbidden zone (to the left of normal position)!");
+        curstatus = STAT_DAMAGE;
+        return 1;
+    }else if(e == ESW_CCW_ACTIVE && curposition > FOCPOS_CW_ESW){
+        // CCW end-switch activated in forbidden zone!
+        WARNX("CCW end-switch in forbidden zone (too far)!");
+        curstatus = STAT_DAMAGE;
+        return 1;
+    }
     // try to move from esw
     parval = DI_NOFUNC;
     uint16_t idx = (e == ESW_CW_ACTIVE) ? PAR_CW_IDX : PAR_CCW_IDX;
@@ -170,23 +230,17 @@ int go_out_from_ESW(){
         getPos(NULL);
         DBG("try %d, pos: %lu, E=%d", i, curposition, e);
         unsigned long targ = (e == ESW_CW_ACTIVE) ? curposition - (double)FOCSCALE_MM*0.2 : curposition + (double)FOCSCALE_MM*0.2;
+        if(targ > FOCMAX) targ = FOCMAX;
+        else if(targ < FOCMIN) targ = FOCMIN;
         if(move(targ, speed)) continue;
         get_endswitches(&e);
         if(e == ESW_INACTIVE) break;
     }
-    // return esw state
-    parval = DI_ENSTOP;
-    if(CAN_NOERR != can_write_par(PAR_DI_SUBIDX, PAR_CW_IDX,  &parval)) goto bad;
-    if(CAN_NOERR != can_write_par(PAR_DI_SUBIDX, PAR_CCW_IDX, &parval)) goto bad;
-    if(e != ESW_INACTIVE){
-        WARNX("Can't move out of end-switch");
-        curstatus = STAT_ERROR;
-        return 1;
-    }
+    if(chk_eswstates()) return 1;
     curstatus = STAT_OK;
     return 0;
 bad:
-    WARNX("Can't get/set esw parameters");
+    WARNX("Can't move out from end-switch");
     curstatus = STAT_ERROR;
     return 1;
 }
@@ -216,27 +270,38 @@ int init_motor_ids(int addr){
  * @return 0 if all OK
  */
 int getPos(double *pos){
+    //FNAME();
     int r = !(getLong(encnodenum, DS406_POSITION_VAL, 0, &curposition));
     if(pos) *pos = FOC_RAW2MM(curposition);
     eswstate e;
     if(CAN_NOERR != get_endswitches(&e)){
-        WARNX("Can't read end-switches state");
         curstatus = STAT_ERROR;
     }else switch(e){
         case ESW_BOTH_ACTIVE:
-            curstatus = STAT_BOTHESW;
+            curstatus = STAT_DAMAGE;
         break;
         case ESW_CCW_ACTIVE:
-            if(curposition > FOCPOS_CCW_ESW) curstatus = STAT_BADESW;
+            if(curposition > FOCPOS_CCW_ESW) curstatus = STAT_DAMAGE;
             else curstatus = STAT_ESW;
         break;
         case ESW_CW_ACTIVE:
-            if(curposition < FOCPOS_CW_ESW) curstatus = STAT_BADESW;
+            if(curposition < FOCPOS_CW_ESW) curstatus = STAT_DAMAGE;
             else curstatus = STAT_ESW;
         break;
         case ESW_INACTIVE:
         default:
             curstatus = STAT_OK;
+    }
+    if(targspd){
+        if(curposition <= FOCMIN && targspd < 0){ // bad value
+            WARNX("Forbidden position < FOCMIN!");
+            stop();
+            curstatus = STAT_FORBIDDEN;
+        }else if(curposition >= FOCMAX && targspd > 0){
+            WARNX("Forbidden position > FOCMAX!");
+            stop();
+            curstatus = STAT_FORBIDDEN;
+        }
     }
     return r;
 }
@@ -262,8 +327,8 @@ void returnPreOper(){
 }
 
 /**
- * @brief fix_targspeed - fix raw speed value if it is greater MAXSPEED or less than MINSPEED
- * @param targspd (io) - raw target speed
+ * @brief fix_targspeed - fix speed value if it is greater MAXSPEED or less than MINSPEED
+ * @param targspd (io) - target speed in rev/min
  */
 static void fix_targspeed(int16_t *targspd){
     if(!targspd) return;
@@ -302,7 +367,7 @@ static canstatus can_send_chk(unsigned char *buf, unsigned char *obuf){
         can_dsleep(0.01);
     }
     if(I == 50){
-        WARNX("Error getting answer");
+        WARNX("can_send_chk(): error getting answer");
         return CAN_NOANSWER;
     }
     if(obuf) memcpy(obuf, rdata, l);
@@ -336,25 +401,26 @@ static canstatus can_send_param(unsigned char *buf, unsigned char *obuf){
     int I, rxpnt, idr, dlen;
     double rxtime;
     unsigned char rdata[8];
-    can_clean_recv(&rxpnt, &rxtime);
-    if(can_send_frame(motor_p_id, l, buf) <= 0){
-        WARNX("Error sending CAN frame (len %d)", l);
-        return CAN_CANTSEND;
-    }
-    /*
+/*
 green("Sent param:     ");
 for(int i=0; i<l; ++i) printf("0x%02x ", buf[i]);
 printf("\n");
 */
+    if(can_send_frame(motor_p_id, l, buf) <= 0){
+        WARNX("Error sending CAN frame (len %d)", l);
+        return CAN_CANTSEND;
+    }
+    can_clean_recv(&rxpnt, &rxtime);
     for(I = 0; I < 50; ++I){
         if(can_recv_frame(&rxpnt, &rxtime, &idr, &dlen, rdata) && (idr&0x1fffffff) == motor_p_id+1) break;
+        //DBG("Got frame from ID 0x%x", idr&0x1fffffff);
         can_dsleep(0.01);
     }
     if(I == 50){
-        WARNX("Error getting answer");
+        WARNX("can_send_param(): error getting answer");
         return CAN_NOANSWER;
     }
-    /*
+/*
 green("Received param: ");
 for(int i=0; i<dlen; ++i) printf("0x%02x ", rdata[i]);
 printf("\n");
@@ -402,14 +468,14 @@ static canstatus can_write_par(uint8_t subidx, uint16_t idx, uint32_t *parval){
     buf[3] = idx & 0xff;
     if(parval){
         uint32_t par = *parval;
-        obuf[4] = (par >> 24) & 0xff;
-        obuf[5] = (par >> 16) & 0xff;
-        obuf[6] = (par >> 8)  & 0xff;
-        obuf[7] = par & 0xff;
+        DBG("parameter: %d", par);
+        buf[4] = (par >> 24) & 0xff;
+        buf[5] = (par >> 16) & 0xff;
+        buf[6] = (par >> 8)  & 0xff;
+        buf[7] = par & 0xff;
     }
     return can_send_param(buf, obuf);
 }
-
 
 /**
  * @brief get_motor_speed
@@ -427,14 +493,6 @@ canstatus get_motor_speed(double *spd){
         return s;
     }
     *spd = (double)speed.i / 1000.;
-    /*
-    union{
-        int16_t i16;
-        uint8_t c8[2];
-    } mspd;
-    mspd.c8[0] = rdata[3];
-    mspd.c8[1] = rdata[2];
-    */
     return CAN_NOERR;
 }
 
@@ -444,8 +502,13 @@ canstatus get_motor_speed(double *spd){
  * @return
  */
 canstatus get_endswitches(eswstate *Esw){
+    //FNAME();
     uint32_t val = 0;
     canstatus s = can_read_par(PAR_DI_SUBIDX, PAR_DIST_IDX, &val);
+    if(s != CAN_NOERR){
+        WARNX("Can't read end-switches state");
+        return s;
+    }
     if(Esw){
         int v = 0;
         if(!(val & ESW_CW)){ // + pressed
@@ -464,9 +527,47 @@ canstatus get_endswitches(eswstate *Esw){
  * @return 0 if all OK
  */
 int stop(){
+    FNAME();
     unsigned char buf[6] = {0, CW_STOP,0,};
     if(can_send_chk(buf, NULL)){
         WARNX("Can't stop motor!");
+        return 1;
+    }
+    targspd = 0;
+    return 0;
+}
+
+/**
+ * @brief waitTillStop - wait for full stop
+ */
+static int waitTillStop(){
+    long oldposition = -1;
+    double spd;
+    int r = 0;
+    if(CAN_NOERR == get_motor_speed(&spd)){
+        DBG("speed: %g, targspd: %d", spd, targspd);
+        if(fabs(spd) > DBL_EPSILON || targspd) r = stop();
+    }else r = stop();
+    if(r) r = stop();
+    if(!r){
+        do{ // wait till stop
+            can_dsleep(0.1);
+            if(CAN_NOERR == get_motor_speed(&spd)){
+                if(fabs(spd) > DBL_EPSILON){
+                    //DBG("Still moving, spd=%g", spd);
+                    //stop();
+                    continue; // wait for zero-speed
+                }else{
+                    DBG("OK, stopped, spd=%g", spd);
+                }
+            }else{DBG("can't get motor speed");};
+            oldposition = curposition;
+            // now wait for full moving stop
+            getLong(encnodenum, DS406_POSITION_VAL, 0, &curposition);
+            //DBG("curpos: %lu, oldpos: %ld", curposition, oldposition);
+        }while((long)curposition != oldposition);
+    }else{
+        curstatus = STAT_ERROR;
         return 1;
     }
     return 0;
@@ -474,17 +575,20 @@ int stop(){
 
 /**
  * @brief movewconstspeed - move with constant speed
- * @param rawspd - given speed
+ * @param spd - given speed (rev/min)
  * @return 0 if all OK
  */
-int movewconstspeed(int spd){
-    if(chk_eswstates()) return 1;
-    int16_t targspd = RAWSPEED(spd);
+int movewconstspeed(int16_t spd){
+    if(chkMove(spd)) return 1;
+    fix_targspeed(&spd);
+    targspd = RAWSPEED(spd);
     unsigned char buf[8] = {0,};
     buf[1] = CW_ENABLE;
-    if(MOTOR_REVERSE) spd = -spd;
-    buf[2] = (targspd >> 8) & 0xff;
-    buf[3] = targspd & 0xff;
+    int16_t s = targspd;
+    if(MOTOR_REVERSE) s = -s;
+    buf[2] = (s >> 8) & 0xff;
+    buf[3] = s & 0xff;
+    DBG("\tBUF: %d, %d, %d, %d", buf[0], buf[1], buf[2], buf[3]);
     if(can_send_chk(buf, NULL)){
         WARNX("Can't move motor!");
         return 1;
@@ -495,27 +599,32 @@ int movewconstspeed(int spd){
 /**
  * @brief move - move focuser from current position to approximately `targposition` with speed `rawspeed`
  * @param targposition - target position in raw value
- * @param rawspeed - speed in raw value
+ * @param rawspeed - raw speed value
  * @return 0 if all OK
  */
 static int move(unsigned long targposition, int16_t rawspeed){
+    //FNAME();
     if(abs(targposition - curposition) < RAWPOS_TOLERANCE){
         verbose("Already at position\n");
+        DBG("Already at position");
         return 0;
     }
-    if(chk_eswstates()) return 1;
+    if(chkMove(rawspeed)) return 1;
     unsigned char buf[6] = {0,};
-    DBG("Start moving with speed %d", rawspeed);
+    DBG("Start moving with speed %d, target position: %lu", rawspeed, targposition);
     buf[1] = CW_ENABLE;
+    targspd = rawspeed;
     if(MOTOR_REVERSE) rawspeed = -rawspeed;
     buf[2] = (rawspeed >> 8) & 0xff;
     buf[3] = rawspeed & 0xff;
     DBG("\tBUF: %d, %d, %d, %d", buf[0], buf[1], buf[2], buf[3]);
+ //unsigned char obuf[8];
     if(can_send_chk(buf, NULL)){
         WARNX("Can't move motor!");
         stop();
         return 1;
     }
+    //DBG("\tOBUF: %d, %d, %d, %d, %d, %d", obuf[0], obuf[1], obuf[2], obuf[3], obuf[4], obuf[5]);
 #ifdef EBUG
     double t0 = can_dtime();
 #endif
@@ -523,9 +632,9 @@ static int move(unsigned long targposition, int16_t rawspeed){
     long corrvalue = (long)rawspeed*(long)rawspeed / STOPPING_COEFF; // correction due to stopping ramp
     DBG("start-> curpos: %ld, difference: %ld, corrval: %ld, tm=%g",
         curposition, olddiffr, corrvalue, can_dtime()-t0);
-    int i, zerctr = 0;
+    int i, zerctr = 0, errctr = 0;
     for(i = 0; i < MOVING_TIMEOUT; ++i){
-        can_dsleep(0.01);
+        can_dsleep(0.001);
         //uint16_t motstat;
         double speed;
         if(emerg_stop){ // emergency stop activated
@@ -541,42 +650,11 @@ static int move(unsigned long targposition, int16_t rawspeed){
             return 1;
         }
         getPos(NULL);
-        if(curstatus != STAT_OK){
-            WARNX("Something bad with end-switches");
+        if(chkMove(targspd)){
+            WARNX("Can't move further!");
             stop();
             return 1;
         }
-        /* eswstate esw;
-        if(get_endswitches(&esw) != CAN_NOERR){
-            WARNX("Can't get endswitches state, stopping");
-            stop();
-            curstatus = STAT_ERROR;
-            return 1;
-        }
-        if(esw != ESW_INACTIVE){ // OOps, something wrong
-            if(esw == ESW_BOTH_ACTIVE){ // error!
-                WARNX("Check end-switches, both active!");
-                curstatus = STAT_BOTHESW;
-                stop();
-                return 1;
-            }
-//TODO: check wrong end-switches!
-            if(rawspeed > 0){ // moving CW, don't care for CCW esw state
-                if(esw == ESW_CW_ACTIVE){
-                    WARNX("CW mowing: end-switch!");
-                    curstatus = STAT_ESW;
-                    stop();
-                    return 1;
-                }
-            }else{ // movig CCW
-                if(esw == ESW_CCW_ACTIVE){
-                    WARNX("CCW mowing: end-switch!");
-                    curstatus = STAT_ESW;
-                    stop();
-                    return 1;
-                }
-            }
-        }*/
         if(fabs(speed) < 0.1){ // || (motstat & (SW_B_UNBLOCK|SW_B_READY|SW_B_POUNBLOCK)) != (SW_B_UNBLOCK|SW_B_READY|SW_B_POUNBLOCK)){
             if(++zerctr == 10){
                 WARNX("Motor stopped while moving!");
@@ -587,11 +665,16 @@ static int move(unsigned long targposition, int16_t rawspeed){
         }else zerctr = 0;
         if(!getLong(encnodenum, DS406_POSITION_VAL, 0, &curposition)) continue;
         long diffr = targposition - curposition;
-        //DBG("Speed: %g, curpos: %ld, diff: %ld", speed, curposition, diffr);
-        if(abs(diffr) < corrvalue || abs(diffr) - RAWPOS_TOLERANCE > abs(olddiffr)){
+    DBG("Speed: %g, curpos: %ld, diff: %ld", speed, curposition, diffr);
+        if(abs(diffr) < corrvalue || abs(diffr) < RAWPOS_TOLERANCE){
             DBG("OK! almost reach: olddif=%ld, diff=%ld, corrval=%ld, tm=%g", olddiffr, diffr, corrvalue, can_dtime()-t0);
             olddiffr = diffr;
             break;
+        }
+        if(abs(diffr) > abs(olddiffr)){
+            ++errctr;
+            DBG("errctr: %d", errctr);
+            if(errctr > 50) break;
         }
         olddiffr = diffr;
     }
@@ -602,20 +685,12 @@ static int move(unsigned long targposition, int16_t rawspeed){
         return 1;
     }
     DBG("end-> curpos: %ld, difference: %ld, tm=%g\n", curposition, targposition - curposition, can_dtime()-t0);
-    long oldposition;
-    int r = stop();
-    if(r) r = stop();
-    if(!r) do{ // wait till stop
-        oldposition = curposition;
-        can_dsleep(0.1);
-        getLong(encnodenum, DS406_POSITION_VAL, 0, &curposition);
-        //DBG("wait-> curpos: %ld, difference: %ld, tm=%g\n", curposition, targposition - curposition, can_dtime()-t0);
-    }while((long)curposition != oldposition);
+    if(waitTillStop()) return 1;
     if(abs(targposition - curposition) > RAWPOS_TOLERANCE)
         verbose("Current (%ld) position is too far from target (%ld)\n", curposition, targposition);
     DBG("stop-> curpos: %ld, difference: %ld, tm=%g\n", curposition, targposition - curposition, can_dtime()-t0);
     curstatus = STAT_OK;
-    return r;
+    return 0;
 }
 
 /**
@@ -624,6 +699,7 @@ static int move(unsigned long targposition, int16_t rawspeed){
  * @return 0 if all OK
  */
 int move2pos(double target){
+    FNAME();
     double cur;
     if(getPos(&cur)){
         WARNX("Can't get current position!");
@@ -639,12 +715,18 @@ int move2pos(double target){
         verbose("Already at position\n");
         return 0;
     }
-    long targ0pos = (long)targposition + (long)dF0;
-    long spd = (targ0pos - (long)curposition) / 2L;
+    long spd, targ0pos = (long)targposition + (long)dF0, absdiff = abs(targ0pos - (long)curposition),
+            sign = (targ0pos > (long)curposition) ? 1 : -1;
+    DBG("absdiff: %ld", absdiff);
+    //long spd = (targ0pos - (long)curposition) / 2L;
+    if(absdiff > 1000) spd = sign*MAXSPEED;
+    else if(absdiff > 500) spd = sign*MAXSPEED / 2;
+    else if(absdiff > 200) spd = sign*MAXSPEED / 4;
+    else spd = sign*MINSPEED;
     int16_t targspd = (int16_t) spd;
-    if(spd > INT16_MAX) targspd = INT16_MAX;
+/*    if(spd > INT16_MAX) targspd = INT16_MAX;
     else if(spd < INT16_MIN) targspd = INT16_MIN;
-    fix_targspeed(&targspd);
+    fix_targspeed(&targspd);*/
     // check moving direction: thin focus correction always should run to negative!
     if(targposition < curposition){ // we are from the right
         if(targspd < -MINSPEED*3/2){ // omit rough moving to focus value if there's too little distance towards target
@@ -657,6 +739,7 @@ int move2pos(double target){
     }else{ // we are from the left - move to the point @ right side of target
         DBG("1) ROUGH move to the RIGHT: curpos=%ld, difference=%ld\n", curposition, targ0pos - (long)curposition);
         if(move(targ0pos, RAWSPEED(targspd))){
+            DBG("Error in move?");
             return 1;
         }
     }
@@ -667,6 +750,7 @@ int move2pos(double target){
     }
     if(abs(targposition - curposition) < RAWPOS_TOLERANCE){
         verbose("Catch the position @ rough movint\n");
+        DBG("Catch the position @ rough movint");
         return 0;
     }
     if(curposition < targposition){
@@ -674,6 +758,10 @@ int move2pos(double target){
         return 1;
     }
     DBG("2) curpos: %ld, difference: %ld\n", curposition, (long)targposition - (long)curposition);
+    //sleep(3);
+    /*DBG("NOW MOVE");
+    move(targposition, -800);
+    DBG("NOW MOVE MORE");*/
     // now make an accurate moving
     if(move(targposition, -(RAWSPEED(MINSPEED)))){
         WARNX("Can't catch focus precisely!");
@@ -687,11 +775,12 @@ int move2pos(double target){
         verbose("Stopped over the accuracy range\n");
         return 1;
     }
-    return stop();
+    return 0;
 }
 
 // return 0 if all OK
-static int get_pos_speed(unsigned long *pos, double *speed){
+int get_pos_speed(unsigned long *pos, double *speed){
+    FNAME();
     int ret = 0;
     if(pos){
         if(!getLong(encnodenum, DS406_POSITION_VAL, 0, pos)) ret = 1;

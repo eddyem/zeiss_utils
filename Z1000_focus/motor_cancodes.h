@@ -78,18 +78,25 @@
 // Some parameters: indexes & subindexes
 // Digital inputs
 #define PAR_DI_SUBIDX   0
-// inputs state (lowest bit is DI00)
+// inputs state (lowest bit is DI00), 0x208E
 #define PAR_DIST_IDX    8334
 // Speed & current
 #define PAR_SPD_SUBIDX  0
 #define PAR_CRNT_SUBIDX 0
+// 0x207E - speed
 #define PAR_SPD_IDX     8318
+// 0x2086 - current
 #define PAR_CRNT_IDX    8326
 // inputs role
+// 0x228c - DI0
 #define PAR_DI00_IDX    8844
+// 0x2090
 #define PAR_DI02_IDX    8336
+// 0x2091
 #define PAR_DI03_IDX    8337
+// 0x2092
 #define PAR_DI04_IDX    8338
+// 0x2093
 #define PAR_DI05_IDX    8339
 // roles:
 #define DI_NOFUNC       0

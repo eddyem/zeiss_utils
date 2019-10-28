@@ -33,13 +33,16 @@
 int help;
 glob_pars  G;
 
+#define DEFPIDNAME "/tmp/z1000focus.pid"
+
 //            DEFAULTS
 // default global parameters
 glob_pars const Gdefault = {
     .nodenum = 3,
     .motorID = 12,
     .gotopos = NAN,
-    .port = DEFPORT
+    .port = DEFPORT,
+    .pidfilename = DEFPIDNAME
 };
 
 /*
@@ -53,7 +56,6 @@ myoption cmdlnopts[] = {
     {"reset",   NO_ARGS,    NULL,   'r',    arg_none,   APTR(&G.reset),     "reset encoder"},
     {"verbose", NO_ARGS,    NULL,   'v',    arg_int,    APTR(&G.verbose),   "show more info"},
     {"motorid", NEED_ARG,   NULL,   'i',    arg_int,    APTR(&G.motorID),   "motor controller address"},
-    //{"bcastid", NEED_ARG,   NULL,   'b',    arg_int,    APTR(&G.motorID),   "motor controller broadcast address"},
     {"gotopos", NEED_ARG,   NULL,   'g',    arg_double, APTR(&G.gotopos),   "target focus position"},
     {"targspeed",NEED_ARG,  NULL,   't',    arg_double, APTR(&G.targspeed), "move motor with constant speed (rev/min)"},
     {"stop",    NO_ARGS,    NULL,   's',    arg_none,   APTR(&G.stop),      "stop motor"},
@@ -61,9 +63,10 @@ myoption cmdlnopts[] = {
     {"eswstate",NO_ARGS,    NULL,   'e',    arg_none,   APTR(&G.showesw),   "show end-switches state"},
     {"logfile", NEED_ARG,   NULL,   'l',    arg_string, APTR(&G.logname),   "logfile name and path"},
     {"server",  NO_ARGS,    NULL,   'S',    arg_none,   APTR(&G.server),    "work as server"},
-    {"port",    NEED_ARG,   NULL,   'p',    arg_string, APTR(&G.port),      "server port number"},
+    {"port",    NEED_ARG,   NULL,   'P',    arg_string, APTR(&G.port),      "server port number (default: " DEFPORT ")"},
     {"host",    NEED_ARG,   NULL,   'H',    arg_string, APTR(&G.host),      "host to connect (default: localhost)"},
     {"standalone",NO_ARGS,  NULL,   'A',    arg_none,   APTR(&G.standalone),"run as standalone application"},
+    {"pidfile", NEED_ARG,   NULL,   'p',    arg_string, APTR(&G.pidfilename),"name of PID-file (default: " DEFPIDNAME ")"},
     end_option
 };
 

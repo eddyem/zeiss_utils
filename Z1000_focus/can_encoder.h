@@ -43,10 +43,10 @@ typedef enum{
     STAT_OK,        // all OK
     // blocking statuses:
     STAT_ESW,       // end-switch active
-    STAT_BADESW,    // wrong end-switch active
-    STAT_BOTHESW,   // both end-switches active
     STAT_GOFROMESW, // mowing from end-switch
-    STAT_ERROR      // uncoverable error
+    STAT_ERROR,     // error state
+    STAT_FORBIDDEN, // forbidden position
+    STAT_DAMAGE     // the device in damaged state and can't work further
 } sysstatus;
 
 int init_encoder(int encnode, int reset);
@@ -59,8 +59,9 @@ canstatus get_motor_speed(double *spd);
 canstatus get_endswitches(eswstate *Esw);
 int move2pos(double target);
 int stop();
-int movewconstspeed(int spd);
+int movewconstspeed(int16_t spd);
 int go_out_from_ESW();
 sysstatus get_status();
+int get_pos_speed(unsigned long *pos, double *speed);
 
 #endif // CAN_ENCODER_H__

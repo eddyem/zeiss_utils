@@ -46,11 +46,11 @@
 // statuses
 #define S_STATUS_OK         "OK"
 #define S_STATUS_ESW        "End-switch active"
-#define S_STATUS_ERROR      "Uncoverable error"
-#define S_STATUS_BOTHESW    "Both end-switches active"
-#define S_STATUS_BADESW     "Wrong end-switch active"
+#define S_STATUS_ERROR      "Erroneous state"
 #define S_STATUS_ESW        "End-switch active"
 #define S_STATUS_GOFROMESW  "Moving from end-switch"
+#define S_STATUS_FORBIDDEN  "Motion in forbidden position"
+#define S_STATUS_DAMAGE     "The focuser damaged and can't work further"
 
 bool emerg_stop;
 

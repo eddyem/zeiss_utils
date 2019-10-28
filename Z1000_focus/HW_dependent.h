@@ -24,6 +24,7 @@
 
 // amount of encoder's counts when stop = rawspeed^2/STOPPING_COEFF
 #define STOPPING_COEFF      (117500L)
+//#define STOPPING_COEFF      (1175000L)
 
 // direction of motor rotation positive to encoder (1 - negative)
 #define MOTOR_REVERSE       (0)
@@ -48,26 +49,26 @@
 // moving timeout (*0.01s)
 #define MOVING_TIMEOUT      5000
 
+
+// constants for focus conversion: foc_mm = (foc_raw - FOCRAW_0) / FOCSCALE_MM
+#define FOCSCALE_MM         4096.
+#define FOCRAW_0            40960.
+#define FOC_RAW2MM(x)       (((x)-FOCRAW_0)/FOCSCALE_MM)
+#define FOC_MM2RAW(x)       (FOCRAW_0+(x)*FOCSCALE_MM)
+
 // raw position precision
-#define RAWPOS_TOLERANCE    20
+#define RAWPOS_TOLERANCE    10
 // raw dF value for accurate focussing
 #define dF0                 100
 // minimal & maximal focus positions (should be >min+dF0 & <max-dF0)
-#define FOCMIN              200
-#define FOCMAX              320000
-// focus raw positions @ endswitches (< or >)
-#define FOCPOS_CW_ESW       5000
-#define FOCPOS_CCW_ESW      315000
-// the same in mm
 #define FOCMIN_MM           0.1
 #define FOCMAX_MM           76.0
+// -//- raw values
+#define FOCMIN              FOC_MM2RAW(FOCMIN_MM)
+#define FOCMAX              FOC_MM2RAW(FOCMAX_MM)
 // permitted distance to end-switch
 #define ESW_DIST_ALLOW      1.0
-
-// constants for focus conversion: foc_mm = (foc_raw - FOCRAW_MM0) / FOCSCALE_MM
-#define FOCSCALE_MM         4096.
-#define FOCRAW_MM0          0
-#define FOC_RAW2MM(x)       ((x-FOCRAW_MM0)/FOCSCALE_MM)
-#define FOC_MM2RAW(x)       (FOCRAW_MM0+x*FOCSCALE_MM)
-
+// focus raw positions @ endswitches (< or >)
+#define FOCPOS_CW_ESW       FOC_MM2RAW((FOCMAX_MM - ESW_DIST_ALLOW))
+#define FOCPOS_CCW_ESW      FOC_MM2RAW((FOCMIN_MM + ESW_DIST_ALLOW))
 #endif // HW_DEPENDENT__

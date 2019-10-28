@@ -22,6 +22,7 @@
 #include <signal.h>
 #include "can_encoder.h"
 #include "canopen.h"
+#include "checkfile.h"
 #include "cmdlnopts.h"
 #include "HW_dependent.h"
 #include "socket.h"
@@ -49,6 +50,7 @@ int verbose(const char *fmt, ...){
  */
 void signals(int signo){
     WARNX("Received signal %d", signo);
+    unlink_pidfile();
     exit(signo);
 }
 
@@ -87,26 +89,27 @@ int main (int argc, char *argv[]){
     }
 
     signal(SIGTERM, signals);
+    signal(SIGKILL, signals);
     signal(SIGTSTP, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
 //can_dev[8] = '1';
 
     if(G->server || G->standalone){ // init hardware
+        check4running(G->pidfilename);
         if(G->logname){
             openlogfile(G->logname);
         }
         if(init_encoder(G->nodenum, G->reset)) ERRX("Encoder not found");
-
+        if(init_motor_ids(G->motorID)){
+            WARNX("Error during motor initialization");
+            ret = 1;
+            goto Oldcond;
+        }
         if(getPos(&curposition)){
             WARNX("Can't read current position");
             ret = 1;
             goto Oldcond;
         }else verbose("Position @ start: %.2fmm\n", curposition);
-
-        if(init_motor_ids(G->motorID)){
-            ret = 1;
-            goto Oldcond;
-        }
     }
 
     if(G->server){ // daemonize & run server
@@ -157,17 +160,20 @@ int main (int argc, char *argv[]){
         ret = move2pos(G->gotopos);
         goto Oldcond;
     }
+    double spd;
+    unsigned long pos;
 
 Oldcond:
-    if(getPos(&curposition)) WARNX("Can't read current position");
+    if(get_pos_speed(&pos, &spd)) WARNX("Can't read current position");
     else{
-        if(G->verbose) printf("pos=%.2fmm, ", curposition);
-        else printf("%.2f\n", curposition);
+        curposition = FOC_RAW2MM(pos);
+        verbose("speed=%d\n", spd);
+        if(G->verbose) printf("pos=%.03fmm, ", curposition);
+        else printf("%.03f\n", curposition);
     }
     if(G->showesw){
         eswstate e;
-        if(CAN_NOERR != get_endswitches(&e)) WARNX("Can't read end-switches state");
-        else switch(e){
+        if(CAN_NOERR == get_endswitches(&e)) switch(e){
             case ESW_INACTIVE:
                 green("End-switches inactive\n");
             break;
@@ -182,10 +188,6 @@ Oldcond:
                 red("ERROR: both end-switches active\n");
         }
     }
-    double spd;
-    if(get_motor_speed(&spd) == CAN_NOERR) verbose("speed=%d\n", spd);
-    else WARNX("Can't read speed");
-
     returnPreOper();
     return ret;
 }

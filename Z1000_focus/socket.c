@@ -86,7 +86,7 @@ bool emerg_stop = FALSE;
 static int send_data(int sock, int webquery, char *buf){
     if(!buf) return 0;
     ssize_t L, Len = strlen(buf);
-    DBG("buf: %s, Len: %zd", buf, Len);
+    //DBG("buf: %s, Len: %zd", buf, Len);
     if(Len < 1) return 0;
     char tbuf[BUFLEN];
     // OK buffer ready, prepare to send it
@@ -160,6 +160,30 @@ static const char *startmoving(double pos){
     return S_ANS_OK;
 }
 
+/**
+ * @brief ego, getoutESW - run go_out_from_ESW in a separate thread
+ */
+static void *ego(_U_ void *unused){
+    DBG("MOVE OUT FROM END-SWITCH");
+    pthread_mutex_lock(&canbus_mutex);
+    go_out_from_ESW();
+    pthread_mutex_unlock(&canbus_mutex);
+    pthread_mutex_unlock(&moving_mutex);
+    pthread_exit(NULL);
+    return NULL;
+}
+static void getoutESW(){
+    pthread_mutex_lock(&moving_mutex);
+    pthread_t m_thread;
+    if(pthread_create(&m_thread, NULL, ego, NULL)){
+        WARN("pthread_create()");
+        pthread_mutex_unlock(&moving_mutex);
+    }else{
+        DBG("Thread created, detouch");
+        pthread_detach(m_thread); // don't care about thread state
+    }
+}
+
 static void *handle_socket(void *asock){
 #define getparam(x)     (strncmp(found, x, sizeof(x)-1) == 0)
     //putlog("handle_socket(): getpid: %d, pthread_self: %lu, tid: %lu",getpid(), pthread_self(), syscall(SYS_gettid));
@@ -170,14 +194,14 @@ static void *handle_socket(void *asock){
     double t0 = dtime();
     while(dtime() - t0 < SOCKET_TIMEOUT){
         if(!waittoread(sock)){ // no data incoming
-            DBG("no incoming data");
+            //DBG("no incoming data");
             continue;
         }
         if((rd = read(sock, buff, BUFLEN-1)) < 1){
-            DBG("socket closed. Exit");
+            //DBG("socket closed. Exit");
             break;
         }
-        DBG("Got %zd bytes", rd);
+        //DBG("Got %zd bytes", rd);
         // add trailing zero to be on the safe side
         buff[rd] = 0;
         // now we should check what do user want
@@ -189,10 +213,10 @@ static void *handle_socket(void *asock){
             // web query have format GET /some.resource
         }
         // here we can process user data
-        DBG("user send: %s%s\n", buff, webquery ? ", web" : "");
+        //DBG("user send: %s%s\n", buff, webquery ? ", web" : "");
         // empty request == focus request
         if(strlen(found) < 1 || getparam(S_CMD_FOCUS)){
-            DBG("position request");
+            //DBG("position request");
             snprintf(buff, BUFLEN, "%.03f", curPos());
         }else if(getparam(S_CMD_STOP)){
             DBG("Stop request");
@@ -232,11 +256,8 @@ static void *handle_socket(void *asock){
                 case STAT_OK:
                     msg = S_STATUS_OK;
                 break;
-                case STAT_BADESW:
-                    msg = S_STATUS_BADESW;
-                break;
-                case STAT_BOTHESW:
-                    msg = S_STATUS_BOTHESW;
+                case STAT_DAMAGE:
+                    msg = S_STATUS_DAMAGE;
                 break;
                 case STAT_ERROR:
                     msg = S_STATUS_ERROR;
@@ -247,6 +268,11 @@ static void *handle_socket(void *asock){
                 case STAT_GOFROMESW:
                     msg = S_STATUS_GOFROMESW;
                 break;
+                case STAT_FORBIDDEN:
+                    msg = S_STATUS_FORBIDDEN;
+                break;
+                default:
+                    msg = "Unknown status";
             }
             sprintf(buff, msg);
         }else sprintf(buff, S_ANS_ERR);
@@ -255,7 +281,7 @@ static void *handle_socket(void *asock){
         }
     }
     close(sock);
-    DBG("closed");
+    //DBG("closed");
     //putlog("socket closed, exit");
     pthread_exit(NULL);
     return NULL;
@@ -286,14 +312,13 @@ static void *server(void *asock){
         struct in_addr ipAddr = pV4Addr->sin_addr;
         char str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &ipAddr, str, INET_ADDRSTRLEN);
-        //putlog("get connection from %s", str);
-        DBG("Got connection from %s", str);
+        //DBG("Got connection from %s", str);
         pthread_t handler_thread;
         if(pthread_create(&handler_thread, NULL, handle_socket, (void*) &newsock)){
             putlog("server(): pthread_create() failed");
             WARN("pthread_create()");
         }else{
-            DBG("Thread created, detouch");
+            //DBG("Thread created, detouch");
             pthread_detach(handler_thread); // don't care about thread state
         }
     }
@@ -322,13 +347,11 @@ static void daemon_(int sock){
         // get current position
         if(!pthread_mutex_trylock(&canbus_mutex)){
             getPos(NULL);
-            if(get_status() != STAT_OK){
-                if(!pthread_mutex_trylock(&moving_mutex)){
-                    go_out_from_ESW();
-                    pthread_mutex_unlock(&moving_mutex);
-                }
-            }
+            sysstatus st = get_status();
             pthread_mutex_unlock(&canbus_mutex);
+            if(st != STAT_OK){
+                getoutESW();
+            }
         }
     }while(1);
     putlog("daemon_(): UNREACHABLE CODE REACHED!");
