@@ -23,16 +23,22 @@
 #ifndef __USEFULL_MACROS_H__
 #define __USEFULL_MACROS_H__
 
-#include <sys/stat.h>
-#include <fcntl.h>
-#include <sys/mman.h>
-#include <unistd.h>
-#include <string.h>
-#include <stdio.h>
-#include <stdarg.h>
-#include <errno.h>
 #include <err.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <locale.h>
+#include <stdarg.h>
+#include <stdint.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <sys/mman.h>
+#include <sys/stat.h>
+#include <sys/time.h>
+#include <sys/types.h>
+#include <termio.h>
+#include <termios.h>
+#include <unistd.h>
 #if defined GETTEXT_PACKAGE && defined LOCALEDIR
 /*
  * GETTEXT
@@ -45,12 +51,7 @@
 #define _(String)               (String)
 #define N_(String)              (String)
 #endif
-#include <stdlib.h>
-#include <termios.h>
-#include <termio.h>
-#include <sys/time.h>
-#include <sys/types.h>
-#include <stdint.h>
+
 
 
 // unused arguments with -Wall -Werror
@@ -74,13 +75,30 @@
 /*
  * ERROR/WARNING messages
  */
+// local warnings
+typedef enum{
+    WARN_NO,            // all ok
+    WARN_ESWSTATE,      // can't read esw state
+    WARN_SENDPAR,       // can_send_param(): error getting answer
+    WARN_MOVEDAMAGED,   // try to move in damaged state
+    WARN_BOTHESW,       // both esw are active
+    WARN_LESSMIN,       // curpos < min
+    WARN_GRTRMAX,       // curpos > max
+    WARN_CANSEND,       // can bus: error sending frame
+    WARN_CANNOANS,      // can bus: no answer
+    WARN_LAST           // N of warnings
+} locwarn;
+// show SINGLEWARN`s not frequently than once per day
+#define  SINGLEW_TIMEOUT    86400
+
 extern int globErr;
 extern void signals(int sig);
-#define ERR(...) do{globErr=errno; _WARN(__VA_ARGS__); signals(9);}while(0)
-#define ERRX(...) do{globErr=0; _WARN(__VA_ARGS__); signals(9);}while(0)
-#define WARN(...) do{globErr=errno; _WARN(__VA_ARGS__);}while(0)
-#define WARNX(...) do{globErr=0; _WARN(__VA_ARGS__);}while(0)
-
+#define ERR(...) do{globErr=errno; FNAME(); _WARN(__VA_ARGS__); putlog("ERROR \"%s\" in %s (%s, line %d):", strerror(globErr), __func__, __FILE__, __LINE__); addtolog(__VA_ARGS__); signals(9);}while(0)
+#define ERRX(...) do{globErr=0; FNAME(); _WARN(__VA_ARGS__); putlog("ERROR \"%s\" in %s (%s, line %d):", strerror(globErr), __func__, __FILE__, __LINE__); addtolog(__VA_ARGS__); signals(9);}while(0)
+#define WARN(...) do{globErr=errno; FNAME(); _WARN(__VA_ARGS__); putlog("WARNING in %s (%s, line %d):", __func__, __FILE__, __LINE__); addtolog(__VA_ARGS__);}while(0)
+#define WARNX(...) do{globErr=0; FNAME(); _WARN(__VA_ARGS__); putlog("WARNING in %s (%s, line %d):", __func__, __FILE__, __LINE__); addtolog(__VA_ARGS__);}while(0)
+// warn with no more than once per hour writting to log, n - warning code
+#define SINGLEWARN(n) do{globErr=0; warnsingle(__func__, n);}while(0)
 /*
  * print function name, debug messages
  * debug mode, -DEBUG
@@ -137,4 +155,7 @@ int str2double(double *num, const char *str);
 
 void openlogfile(char *name);
 int putlog(const char *fmt, ...);
+int addtolog(const char *fmt, ...);
+void warnsingle(const char *msg, locwarn errnum);
+void clrwarnsingle(locwarn errnum);
 #endif // __USEFULL_MACROS_H__

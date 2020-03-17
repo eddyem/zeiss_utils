@@ -387,25 +387,42 @@ int str2double(double *num, const char *str){
     return TRUE;
 }
 
-FILE *Flog = NULL; // log file descriptor
-char *logname = NULL;
-time_t log_open_time = 0;
+static FILE *Flog = NULL; // log file descriptor
+static char *logname = NULL; // full logfile name (with PID prefix)
+static time_t log_open_time = 0; // time when log file was opened
 /**
  * Try to open log file
  * if failed show warning message
  */
 void openlogfile(char *name){
-    if(!name){
-        WARNX(_("Need filename"));
-        return;
+    //char buf[PATH_MAX];
+    if(Flog){
+        fclose(Flog);
+        Flog = NULL;
     }
-    green(_("Try to open log file %s in append mode\n"), name);
+    if(!name) return;
+    /*
+    if(!name){ // filename is omit -> try to open log with old name
+        if(!fullogname){
+            WARNX(_("openlogfile(): need filename"));
+            return;
+        }
+        name = fullogname;
+    }else{
+        if(fullogname) FREE(fullogname);
+        // append PID to name
+        snprintf(buf, PATH_MAX, "%d_%s", getpid(), name);
+        name = buf;
+        green(_("Try to open log file %s in append mode"), name);
+        printf("\n");
+    }*/
     if(!(Flog = fopen(name, "a"))){
         WARN(_("Can't open log file"));
         return;
     }
     log_open_time = time(NULL);
     logname = name;
+    //fullogname = strdup(buf);
 }
 
 /**
@@ -413,22 +430,84 @@ void openlogfile(char *name){
  */
 int putlog(const char *fmt, ...){
     if(!Flog) return 0;
-    time_t t_now = time(NULL);
-    if(t_now - log_open_time > 86400){ // rotate log
-        fprintf(Flog, "\n\t\t%sRotate log\n", ctime(&t_now));
+    char strtm[128];
+    time_t t = time(NULL);
+    struct tm *curtm = localtime(&t);
+    int i = strftime(strtm, 128, "%Y/%m/%d-%H:%M", curtm);
+    if(t - log_open_time > 86400){ // rotate log
+        fprintf(Flog, "\n\n%s\tRotate log\n", strtm);
         fclose(Flog);
+        Flog = NULL;
         char newname[PATH_MAX];
         snprintf(newname, PATH_MAX, "%s.old", logname);
         if(rename(logname, newname)) WARN("rename()");
-        openlogfile(logname);
+        openlogfile(NULL);
         if(!Flog) return 0;
     }
-    int i = fprintf(Flog, "\n\t\t%s", ctime(&t_now));
     va_list ar;
+    fprintf(Flog, "%s\t", strtm);
     va_start(ar, fmt);
-    i = vfprintf(Flog, fmt, ar);
+    i += vfprintf(Flog, fmt, ar);
     va_end(ar);
     fprintf(Flog, "\n");
+    ++i;
     fflush(Flog);
     return i;
+}
+
+// add message to log file without printing time
+int addtolog(const char *fmt, ...){
+    if(!Flog) return 0;
+    va_list ar;
+    int i = 1;
+    fprintf(Flog, "\t\t\t");
+    va_start(ar, fmt);
+    i += vfprintf(Flog, fmt, ar);
+    va_end(ar);
+    fprintf(Flog, "\n");
+    ++i;
+    fflush(Flog);
+    return i;
+}
+
+// messages for warning codes
+static const char *wmsgs[WARN_LAST] = {
+    [WARN_NO]           = "All OK",
+    [WARN_ESWSTATE]     = "Can't read end-switches state",
+    [WARN_SENDPAR]      = "can_send_param(): error getting answer",
+    [WARN_MOVEDAMAGED]  = "Try to move in damaged state",
+    [WARN_BOTHESW]      = "Both end-switches are active! Damage state.",
+    [WARN_LESSMIN]      = "Forbidden position: < FOCMIN!",
+    [WARN_GRTRMAX]      = "Forbidden position: > FOCMAX!",
+    [WARN_CANSEND]      = "Error sending CAN frame",
+    [WARN_CANNOANS]     = "can_send_chk(): error getting answer",
+
+};
+static time_t lasttime[WARN_LAST] = {0};
+
+/**
+ * @brief clrwarnsingle - reset warning timeout & give log message
+ * @param errnum - number of warning
+ */
+void clrwarnsingle(locwarn errnum){
+    if(errnum >= WARN_LAST) return;
+    time_t cur = time(NULL);
+    if(cur - lasttime[errnum] > SINGLEW_TIMEOUT) return;
+    putlog("Cleared error: %s", wmsgs[errnum]);
+    lasttime[errnum] = 0;
+}
+/**
+ * @brief warnsingle
+ * @param msg
+ * @param errnum
+ */
+void warnsingle(const char *msg, locwarn errnum){
+    if(errnum >= WARN_LAST) return;
+    time_t cur = time(NULL);
+    if(cur - lasttime[errnum] < SINGLEW_TIMEOUT) return;
+    lasttime[errnum] = cur;
+    const char *wmsg = wmsgs[errnum];
+    _WARN("WARNING in %s: %s", msg, wmsg);
+    putlog("WARNING in %s:", msg);
+    addtolog(wmsg);
 }

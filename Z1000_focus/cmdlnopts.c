@@ -31,7 +31,7 @@
  * here are global parameters initialisation
  */
 int help;
-glob_pars  G;
+glob_pars  GP;
 
 #define DEFPIDNAME "/tmp/z1000focus.pid"
 
@@ -42,7 +42,8 @@ glob_pars const Gdefault = {
     .motorID = 12,
     .gotopos = NAN,
     .port = DEFPORT,
-    .pidfilename = DEFPIDNAME
+    .pidfilename = DEFPIDNAME,
+    .chpresetval = -1
 };
 
 /*
@@ -52,21 +53,25 @@ glob_pars const Gdefault = {
 myoption cmdlnopts[] = {
     // set 1 to param despite of its repeating number:
     {"help",    NO_ARGS,    NULL,   'h',    arg_none,   APTR(&help),        "show this help"},
-    {"node",    NEED_ARG,   NULL,   'n',    arg_int,    APTR(&G.nodenum),   "encoder node number"},
-    {"reset",   NO_ARGS,    NULL,   'r',    arg_none,   APTR(&G.reset),     "reset encoder"},
-    {"verbose", NO_ARGS,    NULL,   'v',    arg_int,    APTR(&G.verbose),   "show more info"},
-    {"motorid", NEED_ARG,   NULL,   'i',    arg_int,    APTR(&G.motorID),   "motor controller address"},
-    {"gotopos", NEED_ARG,   NULL,   'g',    arg_double, APTR(&G.gotopos),   "target focus position"},
-    {"targspeed",NEED_ARG,  NULL,   't',    arg_double, APTR(&G.targspeed), "move motor with constant speed (rev/min)"},
-    {"stop",    NO_ARGS,    NULL,   's',    arg_none,   APTR(&G.stop),      "stop motor"},
-    {"monitor", NEED_ARG,   NULL,   'm',    arg_double, APTR(&G.monitspd),  "move a little with given speed with monitoring"},
-    {"eswstate",NO_ARGS,    NULL,   'e',    arg_none,   APTR(&G.showesw),   "show end-switches state"},
-    {"logfile", NEED_ARG,   NULL,   'l',    arg_string, APTR(&G.logname),   "logfile name and path"},
-    {"server",  NO_ARGS,    NULL,   'S',    arg_none,   APTR(&G.server),    "work as server"},
-    {"port",    NEED_ARG,   NULL,   'P',    arg_string, APTR(&G.port),      "server port number (default: " DEFPORT ")"},
-    {"host",    NEED_ARG,   NULL,   'H',    arg_string, APTR(&G.host),      "host to connect (default: localhost)"},
-    {"standalone",NO_ARGS,  NULL,   'A',    arg_none,   APTR(&G.standalone),"run as standalone application"},
-    {"pidfile", NEED_ARG,   NULL,   'p',    arg_string, APTR(&G.pidfilename),"name of PID-file (default: " DEFPIDNAME ")"},
+    {"node",    NEED_ARG,   NULL,   'n',    arg_int,    APTR(&GP.nodenum),   "encoder node number"},
+    {"reset",   NO_ARGS,    NULL,   'r',    arg_none,   APTR(&GP.reset),     "reset encoder"},
+    {"verbose", NO_ARGS,    NULL,   'v',    arg_int,    APTR(&GP.verbose),   "show more info"},
+    {"motorid", NEED_ARG,   NULL,   'i',    arg_int,    APTR(&GP.motorID),   "motor controller address"},
+    {"gotopos", NEED_ARG,   NULL,   'g',    arg_double, APTR(&GP.gotopos),   "target focus position"},
+    {"targspeed",NEED_ARG,  NULL,   't',    arg_double, APTR(&GP.targspeed), "move motor with constant speed (rev/min)"},
+    {"stop",    NO_ARGS,    NULL,   's',    arg_none,   APTR(&GP.stop),      "stop motor"},
+    {"monitor", NEED_ARG,   NULL,   'm',    arg_double, APTR(&GP.monitspd),  "move a little with given speed with monitoring"},
+    {"eswstate",NO_ARGS,    NULL,   'e',    arg_none,   APTR(&GP.showesw),   "show end-switches state"},
+    {"logfile", NEED_ARG,   NULL,   'l',    arg_string, APTR(&GP.logname),   "logfile name and path"},
+    {"server",  NO_ARGS,    NULL,   'S',    arg_none,   APTR(&GP.server),    "work as server"},
+    {"port",    NEED_ARG,   NULL,   'P',    arg_string, APTR(&GP.port),      "server port number (default: " DEFPORT ")"},
+    {"host",    NEED_ARG,   NULL,   'H',    arg_string, APTR(&GP.host),      "host to connect (default: localhost)"},
+    {"standalone",NO_ARGS,  NULL,   'A',    arg_none,   APTR(&GP.standalone),"run as standalone application"},
+    {"pidfile", NEED_ARG,   NULL,   'p',    arg_string, APTR(&GP.pidfilename),"name of PID-file (default: " DEFPIDNAME ")"},
+    {"preset",  NEED_ARG,   NULL,   '0',    arg_longlong,APTR(&GP.chpresetval),"change preset value"},
+    {"nomotor", NO_ARGS,    NULL,   'M',    arg_none,   APTR(&GP.nomotor),   "don't initialize motor"},
+    {"noencoder",NO_ARGS,   NULL,   'E',    arg_none,   APTR(&GP.noencoder), "don't initialize encoder"},
+    {"focout",  NEED_ARG,   NULL,   'f',    arg_string, APTR(&GP.focfilename),"filename where to store focus data"},
     end_option
 };
 
@@ -78,12 +83,12 @@ myoption cmdlnopts[] = {
  * @return allocated structure with global parameters
  */
 glob_pars *parse_args(int argc, char **argv){
-    void *ptr = memcpy(&G, &Gdefault, sizeof(G)); assert(ptr);
+    void *ptr = memcpy(&GP, &Gdefault, sizeof(GP)); assert(ptr);
     // format of help: "Usage: progname [args]\n"
     change_helpstring("Usage: %s [args]\n\n\tWhere args are:\n");
     // parse arguments
     parseargs(&argc, &argv, cmdlnopts);
     if(help) showhelp(-1, cmdlnopts);
-    return &G;
+    return &GP;
 }
 

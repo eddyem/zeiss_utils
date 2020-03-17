@@ -35,7 +35,7 @@
 
 #include "cmdlnopts.h"   // glob_pars
 
-#define BUFLEN    (10240)
+#define BUFLEN    (1024)
 // Max amount of connections
 #define BACKLOG   (30)
 
@@ -137,6 +137,7 @@ static void *move_focus(void *targpos){
     pthread_mutex_lock(&canbus_mutex);
     // in any error case we should check end-switches and move out of them!
     if(move2pos(pos)) go_out_from_ESW();
+    putlog("Focus value: %.03f", curPos());
     pthread_mutex_unlock(&moving_mutex);
     pthread_mutex_unlock(&canbus_mutex);
     pthread_exit(NULL);
@@ -186,11 +187,18 @@ static void getoutESW(){
 
 static void *handle_socket(void *asock){
 #define getparam(x)     (strncmp(found, x, sizeof(x)-1) == 0)
-    //putlog("handle_socket(): getpid: %d, pthread_self: %lu, tid: %lu",getpid(), pthread_self(), syscall(SYS_gettid));
     int sock = *((int*)asock);
     int webquery = 0; // whether query is web or regular
     char buff[BUFLEN];
     ssize_t rd;
+    struct sockaddr_in peer;
+    socklen_t peerlen = sizeof(peer);
+    char *peerIP = NULL;
+    if(getpeername(sock, &peer, &peerlen)){
+        WARN("getpeername() failed");
+    }else{
+        peerIP = strdup(inet_ntoa(peer.sin_addr));
+    }
     double t0 = dtime();
     while(dtime() - t0 < SOCKET_TIMEOUT){
         if(!waittoread(sock)){ // no data incoming
@@ -215,9 +223,13 @@ static void *handle_socket(void *asock){
         // here we can process user data
         //DBG("user send: %s%s\n", buff, webquery ? ", web" : "");
         // empty request == focus request
+// TODO: add requests for min/max values (focus & speed)
         if(strlen(found) < 1 || getparam(S_CMD_FOCUS)){
             //DBG("position request");
             snprintf(buff, BUFLEN, "%.03f", curPos());
+        }else if(getparam(S_CMD_LIMITS)){ // send to user limit values
+            snprintf(buff, BUFLEN, "focmin=%g\nfocmax=%g\nminspeed=%d\nmaxspeed=%d\n",
+                        FOCMIN_MM, FOCMAX_MM, MINSPEED, MAXSPEED);
         }else if(getparam(S_CMD_STOP)){
             DBG("Stop request");
             emerg_stop = TRUE;
@@ -226,6 +238,7 @@ static void *handle_socket(void *asock){
             if(stop()) sprintf(buff, S_ANS_ERR);
             else sprintf(buff, S_ANS_OK);
             emerg_stop = FALSE;
+            putlog("%s: request to stop @ %.03f", peerIP, curPos());
             pthread_mutex_unlock(&moving_mutex);
             pthread_mutex_unlock(&canbus_mutex);
         }else if(getparam(S_CMD_TARGSPEED)){
@@ -237,6 +250,7 @@ static void *handle_socket(void *asock){
                 if(!ch || !str2double(&spd, ch+1) || fabs(spd) < MINSPEED || fabs(spd) > MAXSPEED || movewconstspeed(spd)) sprintf(buff, S_ANS_ERR);
                 else{
                     DBG("Move with constant speed %g request", spd);
+                    putlog("%s: move with speed %g, current pos.: %.03f", peerIP, spd, curPos());
                     sprintf(buff, S_ANS_OK);
                 }
                 pthread_mutex_unlock(&canbus_mutex);
@@ -247,8 +261,11 @@ static void *handle_socket(void *asock){
             double pos;
             if(!ch || !str2double(&pos, ch+1) || pos < FOCMIN_MM || pos > FOCMAX_MM) sprintf(buff, S_ANS_ERR);
             else{
-                DBG("Move to position %g request", pos);
-                sprintf(buff, startmoving(pos));
+                const char *ans = startmoving(pos);
+                putlog("%s: move to %.03f, current pos.: %.03f", peerIP, pos, curPos());
+                addtolog("status: %s", ans);
+                sprintf(buff, "%s", ans);
+                DBG("Move to position %g request, status: %s", pos, ans);
             }
         }else if(getparam(S_CMD_STATUS)){
             const char *msg = S_STATUS_ERROR;
@@ -274,15 +291,14 @@ static void *handle_socket(void *asock){
                 default:
                     msg = "Unknown status";
             }
-            sprintf(buff, msg);
+            sprintf(buff, "%s", msg);
         }else sprintf(buff, S_ANS_ERR);
         if(!send_data(sock, webquery, buff)){
             WARNX("can't send data, some error occured");
         }
     }
+    FREE(peerIP);
     close(sock);
-    //DBG("closed");
-    //putlog("socket closed, exit");
     pthread_exit(NULL);
     return NULL;
 #undef getparam
@@ -290,11 +306,9 @@ static void *handle_socket(void *asock){
 
 // main socket server
 static void *server(void *asock){
-    putlog("server(): getpid: %d, pthread_self: %lu, tid: %lu",getpid(), pthread_self(), syscall(SYS_gettid));
     int sock = *((int*)asock);
     if(listen(sock, BACKLOG) == -1){
-        putlog("listen() failed");
-        WARN("listen");
+        WARN("listen() failed");
         return NULL;
     }
     while(1){
@@ -304,8 +318,7 @@ static void *server(void *asock){
         if(!waittoread(sock)) continue;
         newsock = accept(sock, (struct sockaddr*)&their_addr, &size);
         if(newsock <= 0){
-            putlog("accept() failed");
-            WARN("accept()");
+            WARN("accept() failed");
             continue;
         }
         struct sockaddr_in* pV4Addr = (struct sockaddr_in*)&their_addr;
@@ -315,35 +328,51 @@ static void *server(void *asock){
         //DBG("Got connection from %s", str);
         pthread_t handler_thread;
         if(pthread_create(&handler_thread, NULL, handle_socket, (void*) &newsock)){
-            putlog("server(): pthread_create() failed");
-            WARN("pthread_create()");
+            WARN("pthread_create() failed");
         }else{
             //DBG("Thread created, detouch");
             pthread_detach(handler_thread); // don't care about thread state
         }
     }
-    putlog("server(): UNREACHABLE CODE REACHED!");
+    putlog("UNREACHABLE CODE REACHED!");
+}
+
+// refresh file with focus value
+static void subst_file(char *name){
+    if(!name) return;
+    int l = strlen(name) + 7;
+    char *aname = MALLOC(char, l);
+    snprintf(aname, l, "%sXXXXXX", name);
+    int fd = mkstemp(aname);
+    if(fd < 0) goto ret;
+    FILE *f = fdopen(fd, "w");
+    if(!f) goto ret;
+    fprintf(f, "FOCUS   = %.2f\n", curPos());
+    fclose(f);
+    rename(aname, name);
+ret:
+    FREE(aname);
 }
 
 // data gathering & socket management
 static void daemon_(int sock){
     if(sock < 0) return;
     pthread_t sock_thread;
+    double oldpos = curPos();
+    subst_file(G->focfilename);
+    DBG("create server() thread");
     if(pthread_create(&sock_thread, NULL, server, (void*) &sock)){
-        putlog("daemon_(): pthread_create() failed");
-        ERR("pthread_create()");
+        ERR("pthread_create() failed");
     }
     do{
         if(pthread_kill(sock_thread, 0) == ESRCH){ // died
-            WARNX("Sockets thread died");
-            putlog("Sockets thread died");
+            WARNX("sockets thread died");
             pthread_join(sock_thread, NULL);
             if(pthread_create(&sock_thread, NULL, server, (void*) &sock)){
-                putlog("daemon_(): new pthread_create() failed");
-                ERR("pthread_create()");
+                ERR("new pthread_create() failed");
             }
         }
-        usleep(500000); // sleep a little or thread's won't be able to lock mutex
+        usleep(50000); // sleep a little or thread's won't be able to lock mutex
         // get current position
         if(!pthread_mutex_trylock(&canbus_mutex)){
             getPos(NULL);
@@ -352,6 +381,10 @@ static void daemon_(int sock){
             if(st != STAT_OK){
                 getoutESW();
             }
+        }
+        if(G->focfilename && (fabs(oldpos - curPos()) > 0.01)){ // position changed -> change it in file
+            oldpos = curPos();
+            subst_file(G->focfilename);
         }
     }while(1);
     putlog("daemon_(): UNREACHABLE CODE REACHED!");
@@ -368,38 +401,36 @@ void daemonize(const char *port){
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
     if(getaddrinfo(NULL, port, &hints, &res) != 0){
-        ERR("getaddrinfo");
+        ERR("getaddrinfo failed");
     }
     struct sockaddr_in *ia = (struct sockaddr_in*)res->ai_addr;
     char str[INET_ADDRSTRLEN];
     inet_ntop(AF_INET, &(ia->sin_addr), str, INET_ADDRSTRLEN);
-    DBG("canonname: %s, port: %u, addr: %s\n", res->ai_canonname, ntohs(ia->sin_port), str);
+    DBG("canonname: %s, port: %u, addr: %s", res->ai_canonname, ntohs(ia->sin_port), str);
     // loop through all the results and bind to the first we can
     for(p = res; p != NULL; p = p->ai_next){
         if((sock = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1){
-            WARN("socket");
             continue;
         }
         int reuseaddr = 1;
         if(setsockopt(sock, SOL_SOCKET, SO_REUSEADDR, &reuseaddr, sizeof(int)) == -1){
-            ERR("setsockopt");
+            ERR("setsockopt failed");
         }
         if(bind(sock, p->ai_addr, p->ai_addrlen) == -1){
             close(sock);
-            WARN("bind");
             continue;
         }
         break; // if we get here, we have a successfull connection
     }
     if(p == NULL){
-        putlog("failed to bind socket, exit");
         // looped off the end of the list with no successful bind
         ERRX("failed to bind socket");
     }
     freeaddrinfo(res);
+    DBG("going to run daemon_()");
     daemon_(sock);
     close(sock);
-    putlog("socket closed, exit");
+    putlog("daemonize(): UNREACHABLE CODE REACHED!");
     signals(0);
 }
 
@@ -416,7 +447,7 @@ void sock_send_data(const char *host, const char *port, const char *data){
     hints.ai_socktype = SOCK_STREAM;
     hints.ai_flags = AI_PASSIVE;
     if(getaddrinfo(host, port, &hints, &res) != 0){
-        ERR("getaddrinfo");
+        ERR("getaddrinfo failed");
     }
     struct sockaddr_in *ia = (struct sockaddr_in*)res->ai_addr;
     char str[INET_ADDRSTRLEN];
@@ -425,11 +456,9 @@ void sock_send_data(const char *host, const char *port, const char *data){
     // loop through all the results and bind to the first we can
     for(p = res; p != NULL; p = p->ai_next){
         if((sock = socket(p->ai_family, p->ai_socktype, p->ai_protocol)) == -1){
-            WARN("socket");
             continue;
         }
         if(connect(sock, p->ai_addr, p->ai_addrlen) == -1){
-            WARN("connect()");
             close(sock);
             continue;
         }
@@ -450,5 +479,6 @@ void sock_send_data(const char *host, const char *port, const char *data){
             return;
         }
     }
-    WARN("No answer!");
+    WARN("no answer!");
+    close(sock);
 }

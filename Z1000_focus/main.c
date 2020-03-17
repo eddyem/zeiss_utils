@@ -28,7 +28,7 @@
 #include "socket.h"
 #include "usefull_macros.h"
 
-static glob_pars *G;
+glob_pars *G;
 
 /**
  * @brief verbose - printf when parameter `verbose` set
@@ -44,13 +44,14 @@ int verbose(const char *fmt, ...){
     return i;
 }
 
+static pid_t childpid;
 /**
  * @brief signals - signal handler (also called by functions ERR/ERRX)
  * @param signo   - signal number
  */
 void signals(int signo){
     WARNX("Received signal %d", signo);
-    unlink_pidfile();
+    if(childpid) unlink_pidfile(); // parent process died
     exit(signo);
 }
 
@@ -65,7 +66,7 @@ static void cmdparser(){
 #undef BUFL
 }
 
-//extern char can_dev[40];
+extern char can_dev[40];
 
 int main (int argc, char *argv[]){
     int ret = 0;
@@ -76,12 +77,14 @@ int main (int argc, char *argv[]){
     if(fabs(G->targspeed) > DBL_EPSILON && !isnan(G->gotopos))
         ERRX("Arguments \"target speed\" and \"target position\" can't meet together!");
     if(fabs(G->targspeed) > DBL_EPSILON){
+        if(G->nomotor) ERRX("Can't set target speed without motor");
         if(fabs(G->targspeed) < MINSPEED || fabs(G->targspeed) > MAXSPEED){
             WARNX("Target speed should be be from %d to %d (rev/min)", MINSPEED, MAXSPEED);
             return 1;
         }
     }
     if(!isnan(G->gotopos)){
+        if(G->noencoder || G->nomotor) ERRX("Can't go to target position without encoder or motor");
         if(G->gotopos > FOCMAX_MM || G->gotopos < FOCMIN_MM){
             WARNX("Focal distance may be from %g to %g mm", FOCMIN_MM, FOCMAX_MM);
             return 1;
@@ -92,43 +95,35 @@ int main (int argc, char *argv[]){
     signal(SIGKILL, signals);
     signal(SIGTSTP, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
-//can_dev[8] = '1';
+    can_dev[8] = '1';
 
     if(G->server || G->standalone){ // init hardware
         check4running(G->pidfilename);
-        if(G->logname){
-            openlogfile(G->logname);
-        }
-        if(init_encoder(G->nodenum, G->reset)) ERRX("Encoder not found");
-        if(init_motor_ids(G->motorID)){
-            WARNX("Error during motor initialization");
-            ret = 1;
-            goto Oldcond;
-        }
-        if(getPos(&curposition)){
-            WARNX("Can't read current position");
-            ret = 1;
-            goto Oldcond;
-        }else verbose("Position @ start: %.2fmm\n", curposition);
     }
 
     if(G->server){ // daemonize & run server
 #if !defined EBUG
         if(daemon(1, 0)){
             ERR("daemon()");
-        }
+        };
 #endif
         while(1){ // guard for dead processes
-            pid_t childpid = fork();
+            childpid = fork();
             if(childpid){
-                putlog("create child with PID %d\n", childpid);
-                DBG("Created child with PID %d\n", childpid);
+                DBG("child: %d", childpid);
                 wait(NULL);
-                putlog("child %d died\n", childpid);
-                WARNX("Child %d died\n", childpid);
+                DBG("child: %d DIED", childpid);
                 sleep(1);
             }else{
                 prctl(PR_SET_PDEATHSIG, SIGTERM); // send SIGTERM to child when parent dies
+                if(G->server || G->standalone){ // init hardware
+                    if(!G->noencoder && init_encoder(G->nodenum, G->reset)) ERRX("Encoder not found");
+                    if(!G->nomotor && init_motor_ids(G->motorID)) ERRX("Error during motor initialization");
+                }
+                if(G->logname){ // open log file in child
+                    openlogfile(G->logname);
+                    putlog("created child with PID %d", getpid());
+                }
                 daemonize(G->port);
             }
         }
@@ -136,6 +131,25 @@ int main (int argc, char *argv[]){
         cmdparser();
         return 0;
     }
+
+    if(!G->noencoder && init_encoder(G->nodenum, G->reset)){
+        WARNX("Encoder not found");
+#ifndef EBUG
+        return 1;
+#endif
+    }
+    if(!G->nomotor && init_motor_ids(G->motorID)){
+        WARNX("Error during motor initialization");
+        ret = 1;
+#ifndef EBUG
+        goto Oldcond;
+#endif
+    }
+    if(getPos(&curposition)){
+        WARNX("Can't read current position");
+        ret = 1;
+        goto Oldcond;
+    }else verbose("Position @ start: %.2fmm\n", curposition);
 
     if(fabs(G->monitspd) > DBL_EPSILON){
         movewithmon(G->monitspd);
@@ -188,6 +202,6 @@ Oldcond:
                 red("ERROR: both end-switches active\n");
         }
     }
-    returnPreOper();
+    returnPreOper(G->chpresetval);
     return ret;
 }

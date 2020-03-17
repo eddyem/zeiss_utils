@@ -42,6 +42,10 @@ typedef struct{
     char *host;             // host to connect (in client mode)
     int standalone;         // run standalone
     char *pidfilename;      // name of PID-file
+    long long chpresetval;  // change preset value for current position
+    int nomotor;            // don't check and even try to use motor
+    int noencoder;          // don't check and even try to use encoder
+    char *focfilename;      // name of file with focus data
 } glob_pars;
 
 

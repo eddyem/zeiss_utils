@@ -37,6 +37,7 @@
 #define S_CMD_TARGSPEED "targspeed"
 #define S_CMD_GOTO      "goto"
 #define S_CMD_STATUS    "status"
+#define S_CMD_LIMITS    "limits"
 
 // answers through the socket
 #define S_ANS_ERR       "error"
@@ -46,11 +47,10 @@
 // statuses
 #define S_STATUS_OK         "OK"
 #define S_STATUS_ESW        "End-switch active"
-#define S_STATUS_ERROR      "Erroneous state"
-#define S_STATUS_ESW        "End-switch active"
+#define S_STATUS_ERROR      "SEW power if off (or other error)"
 #define S_STATUS_GOFROMESW  "Moving from end-switch"
 #define S_STATUS_FORBIDDEN  "Motion in forbidden position"
-#define S_STATUS_DAMAGE     "The focuser damaged and can't work further"
+#define S_STATUS_DAMAGE     "Damaged state, call engineer"
 
 bool emerg_stop;
 

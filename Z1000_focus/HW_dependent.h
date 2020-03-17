@@ -22,9 +22,10 @@
 
 #include "motor_cancodes.h"
 
-// amount of encoder's counts when stop = rawspeed^2/STOPPING_COEFF
-#define STOPPING_COEFF      (117500L)
-//#define STOPPING_COEFF      (1175000L)
+// On lowest speeds Taccelerated = 0.22s, so wait no more than 0.25s when motor starts
+#define TACCEL              (0.25)
+// max amount of cycles when motor stalled
+#define STALL_MAXCTR        (50)
 
 // direction of motor rotation positive to encoder (1 - negative)
 #define MOTOR_REVERSE       (0)
@@ -45,24 +46,26 @@
 #define RAWSPEED(x)         (x*5)
 // max/min speed (rev/min)
 #define MAXSPEED            1200
-#define MINSPEED            130
-// moving timeout (*0.01s)
-#define MOVING_TIMEOUT      5000
+#define MINSPEED            350
+// speed to move from ESW
+#define ESWSPEED            350
+// moving timeout: 5minutes
+#define MOVING_TIMEOUT      (300)
 
 
 // constants for focus conversion: foc_mm = (foc_raw - FOCRAW_0) / FOCSCALE_MM
 #define FOCSCALE_MM         4096.
-#define FOCRAW_0            40960.
+#define FOCRAW_0            15963187.
 #define FOC_RAW2MM(x)       (((x)-FOCRAW_0)/FOCSCALE_MM)
 #define FOC_MM2RAW(x)       (FOCRAW_0+(x)*FOCSCALE_MM)
 
-// raw position precision
+// raw position precision - 2.5um
 #define RAWPOS_TOLERANCE    10
-// raw dF value for accurate focussing
-#define dF0                 100
+// raw dF value for accurate focussing (rough move to F+dF0 and after this slow move to F)
+#define dF0                 500
 // minimal & maximal focus positions (should be >min+dF0 & <max-dF0)
-#define FOCMIN_MM           0.1
-#define FOCMAX_MM           76.0
+#define FOCMIN_MM           2.75
+#define FOCMAX_MM           76.
 // -//- raw values
 #define FOCMIN              FOC_MM2RAW(FOCMIN_MM)
 #define FOCMAX              FOC_MM2RAW(FOCMAX_MM)
