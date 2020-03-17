@@ -46,11 +46,12 @@
 
 // statuses
 #define S_STATUS_OK         "OK"
-#define S_STATUS_ESW        "End-switch active"
-#define S_STATUS_ERROR      "SEW power if off (or other error)"
-#define S_STATUS_GOFROMESW  "Moving from end-switch"
-#define S_STATUS_FORBIDDEN  "Motion in forbidden position"
-#define S_STATUS_DAMAGE     "Damaged state, call engineer"
+#define S_STATUS_MOVING     "moving"
+#define S_STATUS_ESW        "Wait: end-switch active"
+#define S_STATUS_ERROR      "Error: SEW power is off"
+#define S_STATUS_GOFROMESW  "Wait: moving from end-switch"
+#define S_STATUS_FORBIDDEN  "Error: motion in forbidden position"
+#define S_STATUS_DAMAGE     "Error: damaged state, call engineer"
 
 bool emerg_stop;
 

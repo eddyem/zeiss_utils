@@ -127,6 +127,7 @@ static char* stringscan(char *str, char *needle){
     return a;
 }
 
+static uint8_t ismoving = 0; // ==1 when moving thread is active
 /**
  * @brief move_focus - separate thread moving focus to given position
  * @param targpos - target position
@@ -135,8 +136,10 @@ static void *move_focus(void *targpos){
     double pos = *((double*)targpos);
     DBG("MOVE FOCUS: %g", pos);
     pthread_mutex_lock(&canbus_mutex);
+    ismoving = 1;
     // in any error case we should check end-switches and move out of them!
     if(move2pos(pos)) go_out_from_ESW();
+    ismoving = 0;
     putlog("Focus value: %.03f", curPos());
     pthread_mutex_unlock(&moving_mutex);
     pthread_mutex_unlock(&canbus_mutex);
@@ -271,7 +274,8 @@ static void *handle_socket(void *asock){
             const char *msg = S_STATUS_ERROR;
             switch(get_status()){
                 case STAT_OK:
-                    msg = S_STATUS_OK;
+                    if(ismoving) msg = S_STATUS_MOVING;
+                    else msg = S_STATUS_OK;
                 break;
                 case STAT_DAMAGE:
                     msg = S_STATUS_DAMAGE;
@@ -289,7 +293,7 @@ static void *handle_socket(void *asock){
                     msg = S_STATUS_FORBIDDEN;
                 break;
                 default:
-                    msg = "Unknown status";
+                    "Unknown status";
             }
             sprintf(buff, "%s", msg);
         }else sprintf(buff, S_ANS_ERR);

@@ -1,6 +1,8 @@
 Foc = function(){
 // const REQ_PATH=window.location.hostname+":4444/";
-const REQ_PATH="http://dasha.sao.ru:4444/";
+const REQ_PATH="http://ztcs.sao.ru:4444/";
+const DEBUG = false; // set to true for debug
+var targspeeds = [ 220, 500, 800, 1200 ]; // four target speeds
 var minVal=0.01, maxVal=76.5, curVal = 3.0, curSpeed = 1;
 var timeout_upd, timeout_msg;
 // ID
@@ -24,25 +26,41 @@ function sendrequest(req_STR, _onOK){
     request.send(req_STR);
     timeout_id = setTimeout(function(){blockMsg("Request timeout");}, 3000);
 }
+function Log(x){
+    if(DEBUG) console.log(x);
+}
 // show message blocking all
 function blockMsg(txt, bgcolor){
     $("shadow").style.display = "block";
-    if(!bgcolor) bgcolor = "red";
+    if(!bgcolor) bgcolor = "gray";
+    $("shadow").style.backgroundColor = bgcolor;
     $("shadow").innerHTML = txt.replace("\n", "<br>");
+}
+function btnsStat(moving){
+    var color = moving ? "red" : "green";
+    $("Fstop").disabled = !moving;
+    $("Fstop").style.backgroundColor = moving ? "green" : "red";
+    $("Fset").disabled = moving;
+    $("Fset").style.backgroundColor = color;
+    $("F-").disabled = moving;
+    $("F-").style.backgroundColor = color;
+    $("F+").disabled = moving;
+    $("F+").style.backgroundColor = color;
 }
 // parse answer for status request
 function chkStatus(req){
     var msg = req.responseText;
-    console.log("Get status message: " + msg);
-    if(msg == "OK"){
+    Log("Get status message: " + msg);
+    if(msg == "OK" || msg == "moving"){
         $("shadow").innerHTML = "";
         $("shadow").style.display = "none";
+        btnsStat(msg == "moving");
     }else blockMsg(msg);
 };
 // parse answer for command requests
 function chkCmd(req){
     var msg = req.responseText;
-    console.log("Get cmd answer: " + msg);
+    Log("Get cmd answer: " + msg);
     if(msg != "OK") alert(msg);
 }
     /*
@@ -63,13 +81,13 @@ function ch_status(txt, bgcolor){
 }*/
 var first = true;
 function chF(req){
-    console.log(req.responseText);
+    Log(req.responseText);
     curVal = Number(req.responseText);
     if(first){
         $('focSet').value = curVal;
         first = false;
     }
-    $('curFval').innerHTML = curVal;
+    $('curFval').innerHTML = Number(Math.round(curVal*100.)/100.).toFixed(2);
     //$('focSlider').value = curVal;
 }
 function getdata(){
@@ -78,7 +96,31 @@ function getdata(){
     sendrequest("status", chkStatus);
     timeout_upd = setTimeout(getdata, 1000);
 }
-
+// set limits
+function getLimits(req){
+    var lims = {};
+    req.responseText.split('\n').forEach(function(value){
+        var keypair = value.split('=');
+        lims[keypair[0]] = keypair[1];
+    });
+    if(lims["focmin"]){ // focmin=2.75
+        $('focSet').min = minVal = Number(lims["focmin"]);
+        Log("focmin: " + minVal);
+    }
+    if(lims["focmax"]){ // focmax=76
+        $('focSet').max = maxVal = Number(lims["focmax"]);
+        Log("focmax: " + maxVal);
+    }
+    if(lims["maxspeed"] && lims["minspeed"]){
+        var minspd = Number(lims["minspeed"]); // minspeed=350
+        var maxspd = Number(lims["maxspeed"]); // maxspeed=1200
+        var w = (maxspd - minspd)/3;
+        for(i = 0; i < 4; ++i){
+            targspeeds[i] = Math.round(minspd + w*i);
+            Log("targspeeds["+i+"]="+targspeeds[i]);
+        }
+    }
+}
 // init all things
 function FirstRun(){
     blockMsg("init", "black");
@@ -88,6 +130,7 @@ function FirstRun(){
     F.value = curVal;
     F.min = minVal;
     F.max = maxVal;
+    sendrequest("limits", getLimits);
     getdata();
 }
 // send new focus value
@@ -97,19 +140,19 @@ function SetFocus(){
         alert("Wrong focus value");
         return;
     }
-    console.log("Set focus: " + set);
+    Log("Set focus: " + set);
     sendrequest("goto="+set, chkCmd);
 }
 function Move(dir){
-    console.log("Move to " + ((dir > 0) ? "+" : "-") + " with speed " + curSpeed);
-    var targspeeds = [ 130, 400, 800, 1200 ];
+    Log("Move to " + ((dir > 0) ? "+" : "-") + " with speed " + curSpeed);
+
     var cmd = "targspeed=" + ((dir > 0) ? "" : "-") + targspeeds[curSpeed-1];
     sendrequest(cmd, chkCmd);
-    console.log("send request " + cmd);
+    Log("send request " + cmd);
 }
 function Stop(){
     sendrequest("stop", chkCmd);
-    console.log("Stop");
+    Log("Stop");
 }
 // slider or input field changed
 function change(val){
@@ -117,14 +160,14 @@ function change(val){
     else if(val > maxVal) val = maxVal;
     //$('focSlider').value = val;
     $('focSet').value = val;
-    console.log("Chfocval: " + val);
+    Log("Chfocval: " + val);
 }
 function chSpd(val){
     if(val < 1) val = 1;
     else if(val > 4) val = 4;
     $('speed').value = val;
     curSpeed = val;
-    console.log("Chspd: " + val);
+    Log("Chspd: " + val);
 }
 // update value in input field by current
 function update(){

@@ -1,6 +1,7 @@
 <!DOCTYPE HTML PUBLIC "-//W3C//DTD HTML 4.01//EN" "http://www.w3.org/TR/html4/strict.dtd">
 <html>
 <head>
+<meta http-equiv="Content-Type" content="text/html; charset=ASCII"/>
 <style type="text/css">
 body{text-align:center;}
 .shadow{
@@ -19,8 +20,8 @@ body{text-align:center;}
 .big{font-size: 200%;}
 .M{margin-bottom: 5px;}
 .C{text-align:center; padding: 10px;}
-.btm{margin-top: 15px; color: red; position: fixed; bottom: 10px;
-    width: 50%; left: 25%; font-size: 200%;}
+/*.btm{margin-top: 15px; color: red; position: fixed; bottom: 10px;
+    width: 50%; left: 25%; font-size: 200%;}*/
 </style>
 <script src="focus.js" type="text/javascript" language="javascript"></script>
 <title>Zeiss-1000 focusing</title>
@@ -39,9 +40,9 @@ body{text-align:center;}
         <button class="B" id="F+" onmousedown="Foc.Move(1);" onmouseup="Foc.Stop();">+</button>&nbsp;&nbsp;
     </div>
     <div class="C big">
-        <button class="B" id="Fstop" onclick="Foc.Stop();">Stop</button>
+        <button class="B" id="Fstop" onclick="Foc.Stop();" disabled>Stop</button>
         <input style="width: 130px" id="focSet" type="number" lang="en-150" value="2" min="0.1" max="65" step="0.01"> <!-- onchange="Foc.Ch(this.value);"-->
-        <button class="B" id="Fset" onclick="Foc.SetFocus();">Set</button>
+        <button class="B" id="Fset" onclick="Foc.SetFocus();" disabled>Set</button>
     </div>
 </div>
 <div class="shadow" id="shadow">
