@@ -293,7 +293,7 @@ static void *handle_socket(void *asock){
                     msg = S_STATUS_FORBIDDEN;
                 break;
                 default:
-                    "Unknown status";
+                    msg = "Unknown status";
             }
             sprintf(buff, "%s", msg);
         }else sprintf(buff, S_ANS_ERR);
@@ -312,7 +312,7 @@ static void *handle_socket(void *asock){
 static void *server(void *asock){
     int sock = *((int*)asock);
     if(listen(sock, BACKLOG) == -1){
-        WARN("listen() failed");
+        //WARN("listen() failed");
         return NULL;
     }
     while(1){
@@ -349,6 +349,7 @@ static void subst_file(char *name){
     snprintf(aname, l, "%sXXXXXX", name);
     int fd = mkstemp(aname);
     if(fd < 0) goto ret;
+    fchmod(fd, 0644);
     FILE *f = fdopen(fd, "w");
     if(!f) goto ret;
     fprintf(f, "FOCUS   = %.2f\n", curPos());
@@ -370,7 +371,7 @@ static void daemon_(int sock){
     }
     do{
         if(pthread_kill(sock_thread, 0) == ESRCH){ // died
-            WARNX("sockets thread died");
+            //WARNX("sockets thread died");
             pthread_join(sock_thread, NULL);
             if(pthread_create(&sock_thread, NULL, server, (void*) &sock)){
                 ERR("new pthread_create() failed");

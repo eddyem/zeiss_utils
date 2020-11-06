@@ -20,6 +20,7 @@
  */
 
 #include "usefull_macros.h"
+#include <pthread.h>
 #include <time.h>
 #include <linux/limits.h> // PATH_MAX
 
@@ -387,86 +388,53 @@ int str2double(double *num, const char *str){
     return TRUE;
 }
 
-static FILE *Flog = NULL; // log file descriptor
-static char *logname = NULL; // full logfile name (with PID prefix)
-static time_t log_open_time = 0; // time when log file was opened
+static pthread_mutex_t logmutex = PTHREAD_MUTEX_INITIALIZER;
+static char *logname = NULL;
 /**
  * Try to open log file
  * if failed show warning message
  */
 void openlogfile(char *name){
-    //char buf[PATH_MAX];
-    if(Flog){
-        fclose(Flog);
-        Flog = NULL;
-    }
-    if(!name) return;
-    /*
-    if(!name){ // filename is omit -> try to open log with old name
-        if(!fullogname){
-            WARNX(_("openlogfile(): need filename"));
-            return;
-        }
-        name = fullogname;
-    }else{
-        if(fullogname) FREE(fullogname);
-        // append PID to name
-        snprintf(buf, PATH_MAX, "%d_%s", getpid(), name);
-        name = buf;
-        green(_("Try to open log file %s in append mode"), name);
-        printf("\n");
-    }*/
-    if(!(Flog = fopen(name, "a"))){
-        WARN(_("Can't open log file"));
+    FILE *logfd = fopen(name, "a");
+    if(!logfd){
+        WARN("Can't open log file");
         return;
     }
-    log_open_time = time(NULL);
-    logname = name;
-    //fullogname = strdup(buf);
+    fclose(logfd);
+    /*if(pthread_mutex_init(&logmutex, NULL)){
+        WARN("Can't init log mutes");
+        return;
+    }*/
+    FREE(logname);
+    logname = strdup(name);
 }
 
 /**
  * Save message to log file, rotate logs every 24 hours
  */
-int putlog(const char *fmt, ...){
-    if(!Flog) return 0;
-    char strtm[128];
-    time_t t = time(NULL);
-    struct tm *curtm = localtime(&t);
-    int i = strftime(strtm, 128, "%Y/%m/%d-%H:%M", curtm);
-    if(t - log_open_time > 86400){ // rotate log
-        fprintf(Flog, "\n\n%s\tRotate log\n", strtm);
-        fclose(Flog);
-        Flog = NULL;
-        char newname[PATH_MAX];
-        snprintf(newname, PATH_MAX, "%s.old", logname);
-        if(rename(logname, newname)) WARN("rename()");
-        openlogfile(NULL);
-        if(!Flog) return 0;
+int putlogst(int timest, const char *fmt, ...){
+    if(pthread_mutex_lock(&logmutex)){
+        WARN("Can't lock log mutex");
+        return 0;
     }
+    int i = 0;
+    FILE *logfd = fopen(logname, "a");
+    if(!logfd) goto rtn;
+    if(timest){
+        char strtm[128];
+        time_t t = time(NULL);
+        struct tm *curtm = localtime(&t);
+        strftime(strtm, 128, "%Y/%m/%d-%H:%M:%S", curtm);
+        i = fprintf(logfd, "%s\t", strtm);
+    }else i += fprintf(logfd, "\t\t\t");
     va_list ar;
-    fprintf(Flog, "%s\t", strtm);
     va_start(ar, fmt);
-    i += vfprintf(Flog, fmt, ar);
+    i += vfprintf(logfd, fmt, ar);
     va_end(ar);
-    fprintf(Flog, "\n");
-    ++i;
-    fflush(Flog);
-    return i;
-}
-
-// add message to log file without printing time
-int addtolog(const char *fmt, ...){
-    if(!Flog) return 0;
-    va_list ar;
-    int i = 1;
-    fprintf(Flog, "\t\t\t");
-    va_start(ar, fmt);
-    i += vfprintf(Flog, fmt, ar);
-    va_end(ar);
-    fprintf(Flog, "\n");
-    ++i;
-    fflush(Flog);
+    i += fprintf(logfd, "\n");
+    fclose(logfd);
+rtn:
+    pthread_mutex_unlock(&logmutex);
     return i;
 }
 

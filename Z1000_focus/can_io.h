@@ -5,6 +5,8 @@
 #ifndef CAN_IO_H__
 #define CAN_IO_H__
 
+#include <stdio.h>
+
 #define _U_    __attribute__((__unused__))
 
 

@@ -154,8 +154,9 @@ int write_tty(char *buff, size_t length);
 int str2double(double *num, const char *str);
 
 void openlogfile(char *name);
-int putlog(const char *fmt, ...);
-int addtolog(const char *fmt, ...);
+int putlogst(int timest, const char *fmt, ...);
+#define putlog(...)     putlogst(1, __VA_ARGS__)
+#define addtolog(...)    putlogst(0, __VA_ARGS__)
 void warnsingle(const char *msg, locwarn errnum);
 void clrwarnsingle(locwarn errnum);
 #endif // __USEFULL_MACROS_H__

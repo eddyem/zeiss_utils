@@ -26,9 +26,10 @@
 #include <sys/ipc.h>
 #include <sys/msg.h>
 
-
+#include "usefull_macros.h"
 #include "canmsg.h"
 #include "can_io.h"
+#include "checkfile.h"
 
 char can_dev[40] = "/dev/can0";
 int can_fd=-1;
@@ -110,8 +111,7 @@ void *init_can_io() { /* returns shared area addr. for client control process*/
             memcpy(can_shm_key.name, p+1, 4);
             can_shm_key.name[4]='\0';
         }else{
-            fprintf(stderr,"Wrong CAN device name: %s\n", can_dev);
-            exit(1);
+            ERRX("Wrong CAN device name: %s\n", can_dev);
         }
         can_shm_id = shmget(can_shm_key.code, CAN_SHM_SIZE, 0644);
         if(can_shm_id<0 && errno==EACCES)
@@ -123,22 +123,18 @@ void *init_can_io() { /* returns shared area addr. for client control process*/
         if(can_shm_id<0){
             can_prtime(stderr);
             if(new_shm)
-                sprintf(msg,"Can't create shm CAN buffer '%s'",can_shm_key.name);
+                ERR("Can't create shm CAN buffer '%s'",can_shm_key.name);
             else if(server_mode)
-                sprintf(msg,"CAN-I/O: Can't find shm segment for CAN buffer '%s'",can_shm_key.name);
+                ERR("CAN-I/O: Can't find shm segment for CAN buffer '%s'",can_shm_key.name);
             else
-                snprintf(msg, 256, "Can't find shm segment for CAN buffer '%s' (maybe no CAN-I/O process?)",can_shm_key.name);
-            perror(msg);
-            exit(errno);
+                ERR("Can't find shm segment for CAN buffer '%s' (maybe no CAN-I/O process?)",can_shm_key.name);
         }
         can_shm_addr = shmat(can_shm_id, NULL, 0);
         if(can_shm_addr == (void*)-1 && errno == EACCES)
             can_shm_addr = shmat(can_shm_id, NULL, SHM_RDONLY);
         if(can_shm_addr == (void*)-1){
-            sprintf(msg,"Can't attach shm CAN buffer '%s'",can_shm_key.name);
-            perror(msg);
             shmctl(can_shm_id, IPC_RMID, NULL);
-            exit(errno);
+            ERR("Can't attach shm CAN buffer '%s'",can_shm_key.name);
         }
     }
     can_ctrl_addr = (canmsg_t *)(can_shm_addr+sizeof(int)*4);
@@ -158,18 +154,15 @@ void *init_can_io() { /* returns shared area addr. for client control process*/
             can_fd = open(can_dev, flags);
             canout.id = msgget(canout.key.code, canout.mode);
             if(can_fd < 0 && canout.id < 0) {
-                snprintf(msg, 256, "Error opening CAN device(%s) or CAN output queue '%s'  (maybe no CANqueue server process?)",can_dev,canout.key.name);
-                perror(msg);
+                WARNX("Error opening CAN device(%s) or CAN output queue '%s'  (maybe no CANqueue server process?)",can_dev,canout.key.name);
             }
         }
     }
     if(can_lk > 0) close(can_lk);
     if(( can_lk = open(can_lck, O_RDWR|O_CREAT, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH )) < 0 ){
-        sprintf(msg,"Error opening CAN device lock-file %s", can_lck);
-        perror(msg);
         shmctl(can_shm_id, IPC_RMID, NULL);
         close(can_fd);
-        exit(errno);
+        ERR("Error opening CAN device lock-file %s", can_lck);
     }
     fchmod(can_lk, S_IRUSR|S_IWUSR|S_IRGRP|S_IWGRP|S_IROTH|S_IWOTH);
     if(new_shm){
@@ -243,23 +236,11 @@ void *start_can_io(_U_ void *arg){
             if(n < 0){
                 perror("CAN Rx error");
             } else if(n > 0) {
-                /* work around the timestamp bug in old driver version
-                while((double)rx.timestamp.tv_sec+(double)rx.timestamp.tv_usec/1e6 < (double)tm.tv_sec+(double)tm.tv_usec/1e6) {
-                rx.timestamp.tv_usec += 10000;
-                if(rx.timestamp.tv_usec > 1000000) {
-                rx.timestamp.tv_sec++;
-                rx.timestamp.tv_usec -= 1000000;
-                }
-                }*/
                 if(flock(can_lk, LOCK_EX)<0) perror("locking CAN");
                 rx_buff[rx_buff_pntr] = rx;
                 rx_buff_pntr = (rx_buff_pntr + 1) % CAN_RX_SIZE;
                 if(flock(can_lk, LOCK_UN)<0) perror("unlocking CAN");
-                //fprintf(stderr,"%d read(id=%02x,len=%d)\n",rx_buff_pntr,rx.id,rx.length);fflush(stderr);
-                /*fprintf(stderr,"reading CAN: 1 frame\n");*/
-            }/*else {
-            * fprintf(stderr,"reading CAN: nothing\n");fflush(stderr);
-            } */
+            }
         } while(n>0);
     }
 }
@@ -283,7 +264,6 @@ void can_put_buff_frame(double rtime, int id, int length, unsigned char data[]) 
     rx_buff[rx_buff_pntr] = rx;
     rx_buff_pntr = (rx_buff_pntr + 1) % CAN_RX_SIZE;
     if(flock(can_lk, LOCK_UN)<0) perror("unlocking CAN");
-//fprintf(stderr,"put_buf(id=%02x,flag=%1x,len=%d)\n",rx.id,rx.flags,rx.length);fflush(stderr);
 }
 
 /* Все нормально с SHM-буфером CAN-I/O процесса */
@@ -481,6 +461,7 @@ void can_exit(int sig) {
 
     struct shmid_ds buf;
     if(sig) signal(sig,SIG_IGN);
+    putlog("Received signal %d\n", sig);
     if(server_mode) can_abort(sig);
     switch (sig) {
     case 0      : strcpy(ss,"Exiting - ");  break;
@@ -517,6 +498,7 @@ void can_exit(int sig) {
         shmctl(can_shm_id, IPC_STAT, &buf);
         if(buf.shm_nattch == 0)
             shmctl(can_shm_id, IPC_RMID, NULL);
+        unlink_pidfile();
         exit(sig);
     }
 }

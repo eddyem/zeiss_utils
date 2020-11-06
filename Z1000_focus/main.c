@@ -20,6 +20,7 @@
 #include <sys/wait.h>
 #include <sys/prctl.h>
 #include <signal.h>
+#include "can_io.h"
 #include "can_encoder.h"
 #include "canopen.h"
 #include "checkfile.h"
@@ -45,14 +46,8 @@ int verbose(const char *fmt, ...){
 }
 
 static pid_t childpid;
-/**
- * @brief signals - signal handler (also called by functions ERR/ERRX)
- * @param signo   - signal number
- */
 void signals(int signo){
-    WARNX("Received signal %d", signo);
-    if(childpid) unlink_pidfile(); // parent process died
-    exit(signo);
+    can_exit(signo);
 }
 
 static void cmdparser(){
@@ -91,22 +86,21 @@ int main (int argc, char *argv[]){
         }
     }
 
-    signal(SIGTERM, signals);
-    signal(SIGKILL, signals);
     signal(SIGTSTP, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
     can_dev[8] = '1';
-
+/*
     if(G->server || G->standalone){ // init hardware
         check4running(G->pidfilename);
     }
-
+*/
     if(G->server){ // daemonize & run server
 #if !defined EBUG
         if(daemon(1, 0)){
             ERR("daemon()");
         };
 #endif
+        check4running(G->pidfilename);
         while(1){ // guard for dead processes
             childpid = fork();
             if(childpid){
@@ -131,6 +125,8 @@ int main (int argc, char *argv[]){
         cmdparser();
         return 0;
     }
+
+    check4running(G->pidfilename);
 
     if(!G->noencoder && init_encoder(G->nodenum, G->reset)){
         WARNX("Encoder not found");
