@@ -45,24 +45,33 @@
 // rev/min to raw speed value
 #define RAWSPEED(x)         (x*5)
 // max/min speed (rev/min)
-#define MAXSPEED            1200
-#define MINSPEED            350
+#define MAXSPEED            (1200)
+#define MINSPEED            (350)
+// encoder differences (if larger) for speed (MAXSPEED, MAXSPEED/2 and MAXSPEED/3) select
+#define ENCODER_DIFF_SPEED1 (1500)
+#define ENCODER_DIFF_SPEED2 (500)
+#define ENCODER_DIFF_SPEED3 (150)
 // speed to move from ESW
-#define ESWSPEED            350
+#define ESWSPEED            (350)
 // moving timeout: 5minutes
 #define MOVING_TIMEOUT      (300)
+// correction parameters: steps after stopping = CORR0 + (CORR1 + CORR2*rs)*rs)
+// where rs is raw speed
+#define CORR0               (-46.0)
+#define CORR1               (4.2857e-3)
+#define CORR2               (1.5714e-5)
 
 
 // constants for focus conversion: foc_mm = (foc_raw - FOCRAW_0) / FOCSCALE_MM
-#define FOCSCALE_MM         4096.
-#define FOCRAW_0            15963187.
+#define FOCSCALE_MM         (4096.)
+#define FOCRAW_0            (15963187.)
 #define FOC_RAW2MM(x)       (((x)-FOCRAW_0)/FOCSCALE_MM)
 #define FOC_MM2RAW(x)       (FOCRAW_0+(x)*FOCSCALE_MM)
 
 // raw position precision - 2.5um
 #define RAWPOS_TOLERANCE    10
-// raw dF value for accurate focussing (rough move to F+dF0 and after this slow move to F)
-#define dF0                 500
+// raw dF value for accurate focussing (rough move to F-dF0 and after this slow move to F)
+#define dF0                 250
 // minimal & maximal focus positions (should be >min+dF0 & <max-dF0)
 #define FOCMIN_MM           2.75
 #define FOCMAX_MM           76.

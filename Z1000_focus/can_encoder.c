@@ -706,7 +706,8 @@ static int move(unsigned long targposition, int16_t rawspeed){
     // in rawspeed = -27.96 + 1.84e-2*v + 1.52e-5*v^2
     double rs = fabs((double)rawspeed);
     //double cv = (-27.96 + (1.84e-2 + 1.52e-5*rs)*rs);
-    double cv = (-50. + (1.84e-2 + 1.52e-5*rs)*rs);
+    double cv = (CORR0 + (CORR1 + CORR2 * rs)*rs);
+    DBG("Corr coefficients: %g, %g, %g; raw speed: %g", CORR0, CORR1, CORR2, rs);
     long corrvalue = (long) cv; // correction due to stopping ramp
     if(corrvalue < 10) corrvalue = 10;
     DBG("start-> curpos: %ld, difference: %ld, corrval: %ld",
@@ -755,7 +756,7 @@ static int move(unsigned long targposition, int16_t rawspeed){
             ++errctr;
             DBG("errctr: %d", errctr);
             if(errctr > STALL_MAXCTR) break;
-        }
+        }else errctr = 0;
         olddiffr = diffr;
     }
     if(can_dtime() - t0 > MOVING_TIMEOUT){
@@ -796,13 +797,12 @@ int move2pos(double target){
         verbose("Already at position\n");
         return 0;
     }
-    long spd, targ0pos = (long)targposition + (long)dF0, absdiff = labs(targ0pos - (long)curposition),
+    long spd, targ0pos = (long)targposition - (long)dF0, absdiff = labs(targ0pos - (long)curposition),
             sign = (targ0pos > (long)curposition) ? 1 : -1;
     DBG("absdiff: %ld", absdiff);
-    // move not less than for 1s
-    if(absdiff > 1500) spd = sign*MAXSPEED;
-    else if(absdiff > 500) spd = sign*MAXSPEED / 2;
-    else if(absdiff > 150) spd = sign*MAXSPEED / 3;
+    if(absdiff > ENCODER_DIFF_SPEED1) spd = sign*MAXSPEED;
+    else if(absdiff > ENCODER_DIFF_SPEED2) spd = sign*MAXSPEED / 2;
+    else if(absdiff > ENCODER_DIFF_SPEED3) spd = sign*MAXSPEED / 3;
     else spd = sign*MINSPEED;
     int16_t targspd = (int16_t) spd;
     DBG("TARGSPD: %d", targspd);
@@ -810,16 +810,16 @@ int move2pos(double target){
     else if(spd < INT16_MIN) targspd = INT16_MIN;
     fix_targspeed(&targspd);*/
     // check moving direction: thin focus correction always should run to negative!
-    if(targposition < curposition){ // we are from the right
-        if(targspd < -MINSPEED*3/2){ // omit rough moving to focus value if there's too little distance towards target
+    if(targposition > curposition){ // we are from the left
+        if(targspd > MINSPEED*3/2){ // omit rough moving to focus value if there's too little distance towards target
             // rough moving
-            DBG("1) ROUGH move to the LEFT: curpos=%ld, difference=%ld\n", curposition, targ0pos - (long)curposition);
+            DBG("1) ROUGH move to the RIGHT: curpos=%ld, difference=%ld\n", curposition, targ0pos - (long)curposition);
             if(move(targ0pos, RAWSPEED(targspd))){
                 return 1;
             }
         }
-    }else{ // we are from the left - move to the point @ right side of target
-        DBG("1) ROUGH move to the RIGHT: curpos=%ld, difference=%ld\n", curposition, targ0pos - (long)curposition);
+    }else{ // we are from the right - move to the point @ left side of target
+        DBG("1) ROUGH move to the LEFT: curpos=%ld, difference=%ld\n", curposition, targ0pos - (long)curposition);
         if(move(targ0pos, RAWSPEED(targspd))){
             DBG("Error in move?");
             return 1;
@@ -835,17 +835,13 @@ int move2pos(double target){
         DBG("Catch the position @ rough moving");
         return 0;
     }
-    if(curposition < targposition){
+    if(curposition > targposition){ // we should be from the left of target
         WARNX("Error in current position: %.3f instead of %.3f!", FOC_RAW2MM(curposition), FOC_RAW2MM(targposition));
         return 1;
     }
     DBG("2) curpos: %ld, difference: %ld\n", curposition, (long)targposition - (long)curposition);
-    //sleep(3);
-    /*DBG("NOW MOVE");
-    move(targposition, -800);
-    DBG("NOW MOVE MORE");*/
     // now make an accurate moving
-    if(move(targposition, -(RAWSPEED(MINSPEED)))){
+    if(move(targposition, RAWSPEED(MINSPEED))){
         WARNX("Can't catch focus precisely!");
         return 1;
     }

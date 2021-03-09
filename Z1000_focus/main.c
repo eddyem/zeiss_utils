@@ -45,8 +45,8 @@ int verbose(const char *fmt, ...){
     return i;
 }
 
-static pid_t childpid;
 void signals(int signo){
+    unlink_pidfile();
     can_exit(signo);
 }
 
@@ -89,20 +89,17 @@ int main (int argc, char *argv[]){
     signal(SIGTSTP, SIG_IGN);
     signal(SIGHUP, SIG_IGN);
     can_dev[8] = '1';
-/*
-    if(G->server || G->standalone){ // init hardware
-        check4running(G->pidfilename);
-    }
-*/
+
     if(G->server){ // daemonize & run server
-#if !defined EBUG
+#ifndef EBUG
         if(daemon(1, 0)){
             ERR("daemon()");
-        };
+        }
 #endif
         check4running(G->pidfilename);
+#ifndef EBUG
         while(1){ // guard for dead processes
-            childpid = fork();
+            pid_t childpid = fork();
             if(childpid){
                 DBG("child: %d", childpid);
                 wait(NULL);
@@ -121,6 +118,13 @@ int main (int argc, char *argv[]){
                 daemonize(G->port);
             }
         }
+#else
+    if(G->logname){ // open log file in child
+        openlogfile(G->logname);
+        putlog("Running in debug mode, PID %d", getpid());
+    }
+    daemonize(G->port);
+#endif
     }else if(!G->standalone){
         cmdparser();
         return 0;
