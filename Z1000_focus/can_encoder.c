@@ -32,6 +32,8 @@ static uint8_t encoderRDY = 0, motorRDY = 0;
 // printf when -v
 extern int verbose(const char *fmt, ...);
 
+extern bool emerg_stop;
+
 // CAN bus IDs: for motor's functions (PI ID [F=4] == PO ID[F=3] + 1) and parameters
 static unsigned long motor_id = 0, motor_p_id = 0;//, bcast_id = 1;
 // current motor position (RAW)
@@ -422,7 +424,8 @@ static canstatus can_send_chk(unsigned char *buf, unsigned char *obuf){
         SINGLEWARN(WARN_CANSEND);
         return CAN_CANTSEND;
     }else clrwarnsingle(WARN_CANSEND);
-    int I, rxpnt, idr, dlen;
+    int I, rxpnt, dlen;
+    canid_t idr;
     double rxtime;
     unsigned char rdata[8];
     can_clean_recv(&rxpnt, &rxtime);
@@ -463,7 +466,8 @@ static canstatus can_send_chk(unsigned char *buf, unsigned char *obuf){
 static canstatus can_send_param(unsigned char *buf, unsigned char *obuf){
     if(!motorRDY) return CAN_NOANSWER;
     const int l = 8; // frame length
-    int I, rxpnt, idr, dlen;
+    int I, rxpnt, dlen;
+    canid_t idr;
     double rxtime;
     unsigned char rdata[8];
 /*

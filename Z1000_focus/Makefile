@@ -1,17 +1,23 @@
 # run `make DEF="-D... -D..."` to add extra defines
-PROGRAM := can_phocus
+PROGRAM := can_focus
 LDFLAGS := -fdata-sections -ffunction-sections -Wl,--gc-sections -Wl,--discard-all -pthread
 SRCS := $(wildcard *.c)
 DEFINES := $(DEF) -D_GNU_SOURCE -D_XOPEN_SOURCE=1111
 OBJDIR := mk
-CFLAGS += -O2 -Wall -Werror -Wextra -Wno-trampolines -std=gnu99
+CFLAGS += -O2 -std=gnu99 -Wall -Wextra
+#ifneq (,$(findstring DEBUG, $(DEF)))
+#  CFLAGS += -Werror
+#  $(info Warnings considered as errors)
+#endif
 OBJS := $(addprefix $(OBJDIR)/, $(SRCS:%.c=%.o))
 DEPS := $(OBJS:.o=.d)
 CC ?= gcc
-$(info GCC is: ${CC})
 #CXX = g++
 
 all : $(OBJDIR) $(PROGRAM)
+
+debug: CFLAGS += -DEBUG -Werror
+debug: all
 
 $(PROGRAM) : $(OBJS)
 	@echo -e "\t\tLD $(PROGRAM)"

@@ -37,6 +37,16 @@
 #define DS406_SENSOR_AMPLITUDE  0x2200
 #define DS406_TARG_FREQ_DEVIAT  0x2201
 
+//  Configuration parameters
+// subindex=1 - Safety code sequence (uint16) - 0 for CW, 1 for CCW
+// 2 - Safety preset value (uint32)
+// 3 - Inverted safety preset value (uint32)
+#define DS406_CONF_PARAMETERS   0x5000
+#define DS406_CONF_VALID        0x50FE
+#define DS406_CONF_VALID_VALID  0xA5
+#define DS406_CONF_CHECKSUM     0x50FF
+
+
 #define DS406_OPER_PARAMS       0x6000
 #define DS406_MEAS_UNITS_PERREV 0x6001
 #define DS406_TOT_MEAS_RANGE    0x6002

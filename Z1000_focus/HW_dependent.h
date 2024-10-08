@@ -23,7 +23,7 @@
 #include "motor_cancodes.h"
 
 // On lowest speeds Taccelerated = 0.22s, so wait no more than 0.25s when motor starts
-#define TACCEL              (0.25)
+#define TACCEL              (0.50)
 // max amount of cycles when motor stalled
 #define STALL_MAXCTR        (50)
 
@@ -45,7 +45,7 @@
 // rev/min to raw speed value
 #define RAWSPEED(x)         (x*5)
 // max/min speed (rev/min)
-#define MAXSPEED            (1200)
+#define MAXSPEED            (1550)
 #define MINSPEED            (350)
 // encoder differences (if larger) for speed (MAXSPEED, MAXSPEED/2 and MAXSPEED/3) select
 #define ENCODER_DIFF_SPEED1 (1500)
@@ -57,9 +57,12 @@
 #define MOVING_TIMEOUT      (300)
 // correction parameters: steps after stopping = CORR0 + (CORR1 + CORR2*rs)*rs)
 // where rs is raw speed
-#define CORR0               (-46.0)
-#define CORR1               (4.2857e-3)
-#define CORR2               (1.5714e-5)
+//#define CORR0               (-38.919)
+//#define CORR1               (-4.3223e-3)
+//#define CORR2               (1.6549e-5)
+#define CORR0               (6.7704)
+#define CORR1               (6.1857e-3)
+#define CORR2               (1.1271e-5)
 
 
 // constants for focus conversion: foc_mm = (foc_raw - FOCRAW_0) / FOCSCALE_MM

@@ -50,7 +50,7 @@ typedef enum{
 } sysstatus;
 
 int init_encoder(int encnode, int reset);
-void returnPreOper();
+void returnPreOper(long long presetval);
 int getPos(double *pos);
 double curPos();
 int init_motor_ids(int addr);

@@ -45,7 +45,7 @@ extern glob_pars *G;
 /**
  * wait for answer from socket
  * @param sock - socket fd
- * @return 0 in case of error or timeout, 1 in case of socket ready
+ * @return 0 in case of timeout, -1 if error, 1 in case of socket ready
  */
 static int waittoread(int sock){
     fd_set fds;
@@ -60,7 +60,7 @@ static int waittoread(int sock){
         if(rc < 0){
             if(errno != EINTR){
                 WARN("select()");
-                return 0;
+                return -1;
             }
             continue;
         }
@@ -98,16 +98,18 @@ static int send_data(int sock, int webquery, char *buf){
             "Access-Control-Allow-Credentials: true\r\n"
             "Content-type: text/plain\r\nContent-Length: %zd\r\n\r\n", Len);
         if(L < 0){
-            WARN("sprintf()");
+            WARN("sprintf: L=%zd", L);
             return 0;
         }
-        if(L != write(sock, tbuf, L)){
-            WARN("write");
+        ssize_t W = write(sock, tbuf, L);
+        if(L != W){
+            WARN("write header: %zd instead of %zd", W, L);
             return 0;
         }
     }
-    if(Len != write(sock, buf, Len)){
-        WARN("write()");
+    ssize_t W = write(sock, buf, Len);
+    if(Len != W){
+        WARN("write data: %zd instead of %zd", W, Len);
         return 0;
     }
     return 1;
@@ -204,9 +206,12 @@ static void *handle_socket(void *asock){
     }
     double t0 = dtime();
     while(dtime() - t0 < SOCKET_TIMEOUT){
-        if(!waittoread(sock)){ // no data incoming
+	int w = waittoread(sock);
+        if(w == 0){ // no data incoming
             //DBG("no incoming data");
             continue;
+        }else if(w < 0){ // socket closed -> go out
+    	    break;
         }
         if((rd = read(sock, buff, BUFLEN-1)) < 1){
             //DBG("socket closed. Exit");
@@ -298,7 +303,7 @@ static void *handle_socket(void *asock){
             sprintf(buff, "%s", msg);
         }else sprintf(buff, S_ANS_ERR);
         if(!send_data(sock, webquery, buff)){
-            WARNX("can't send data, some error occured");
+            WARNX("can't send data to %s, some error occured", peerIP);
         }
     }
     FREE(peerIP);
@@ -319,7 +324,9 @@ static void *server(void *asock){
         socklen_t size = sizeof(struct sockaddr_in);
         struct sockaddr_in their_addr;
         int newsock;
-        if(!waittoread(sock)) continue;
+        int w = waittoread(sock);
+        if(w == 0) continue;
+        else if(w < 0) break;
         newsock = accept(sock, (struct sockaddr*)&their_addr, &size);
         if(newsock <= 0){
             WARN("accept() failed");
@@ -339,6 +346,7 @@ static void *server(void *asock){
         }
     }
     putlog("UNREACHABLE CODE REACHED!");
+    return NULL;
 }
 
 // refresh file with focus value
@@ -352,7 +360,7 @@ static void subst_file(char *name){
     fchmod(fd, 0644);
     FILE *f = fdopen(fd, "w");
     if(!f) goto ret;
-    fprintf(f, "FOCUS   = %.2f\n", curPos());
+    fprintf(f, "FOCUS   = %.3f\n", curPos());
     fclose(f);
     rename(aname, name);
 ret:
@@ -364,7 +372,7 @@ static void daemon_(int sock){
     if(sock < 0) return;
     pthread_t sock_thread;
     double oldpos = curPos();
-    subst_file(G->focfilename);
+    if(G->focfilename) subst_file(G->focfilename);
     DBG("create server() thread");
     if(pthread_create(&sock_thread, NULL, server, (void*) &sock)){
         ERR("pthread_create() failed");
@@ -387,7 +395,7 @@ static void daemon_(int sock){
                 getoutESW();
             }
         }
-        if(G->focfilename && (fabs(oldpos - curPos()) > 0.01)){ // position changed -> change it in file
+        if(G->focfilename && (fabs(oldpos - curPos()) > 0.001)){ // position changed -> change it in file
             oldpos = curPos();
             subst_file(G->focfilename);
         }
@@ -474,7 +482,9 @@ void sock_send_data(const char *host, const char *port, const char *data){
     if(send(sock, data, L, 0) != (ssize_t)L){ WARN("send"); return;}
     double t0 = dtime();
     while(dtime() - t0 < SOCKET_TIMEOUT){
-        if(!waittoread(sock)) continue;
+	int w = waittoread(sock);
+        if(w == 0) continue;
+        else if(w < 0) break;
         char buff[32];
         int n = read(sock, buff, 31);
         if(n > 0){

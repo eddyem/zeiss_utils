@@ -27,7 +27,7 @@
 #include "stdbool.h"
 
 // timeout for socket closing
-#define SOCKET_TIMEOUT  (5.0)
+#define SOCKET_TIMEOUT  (10.0)
 // default port number (strinig)
 #define DEFPORT         "4444"
 
@@ -53,7 +53,7 @@
 #define S_STATUS_FORBIDDEN  "Error: motion in forbidden position"
 #define S_STATUS_DAMAGE     "Error: damaged state, call engineer"
 
-bool emerg_stop;
+//bool emerg_stop;
 
 void daemonize(const char *port);
 void sock_send_data(const char *host, const char *port, const char *data);
