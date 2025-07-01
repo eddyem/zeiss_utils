@@ -59,7 +59,7 @@ static int waittoread(int sock){
         rc = select(sock+1, &fds, NULL, NULL, &timeout);
         if(rc < 0){
             if(errno != EINTR){
-                WARN("select()");
+                //WARN("select()");
                 return -1;
             }
             continue;
@@ -72,8 +72,7 @@ static int waittoread(int sock){
 
 /**************** SERVER FUNCTIONS ****************/
 // `canbus_mutex` used to exclude simultaneous CAN messages
-// `moving_mutex` used to block simultaneous attempts to move motor
-static pthread_mutex_t canbus_mutex = PTHREAD_MUTEX_INITIALIZER, moving_mutex = PTHREAD_MUTEX_INITIALIZER;
+static pthread_mutex_t canbus_mutex = PTHREAD_MUTEX_INITIALIZER;
 bool emerg_stop = FALSE;
 
 /**
@@ -103,7 +102,7 @@ static int send_data(int sock, int webquery, char *buf){
         }
         ssize_t W = write(sock, tbuf, L);
         if(L != W){
-            WARN("write header: %zd instead of %zd", W, L);
+            //WARN("write header: %zd instead of %zd", W, L);
             return 0;
         }
     }
@@ -143,7 +142,6 @@ static void *move_focus(void *targpos){
     if(move2pos(pos)) go_out_from_ESW();
     ismoving = 0;
     putlog("Focus value: %.03f", curPos());
-    pthread_mutex_unlock(&moving_mutex);
     pthread_mutex_unlock(&canbus_mutex);
     pthread_exit(NULL);
     return NULL;
@@ -151,13 +149,12 @@ static void *move_focus(void *targpos){
 
 static const char *startmoving(double pos){
     static double sp;
-    if(pthread_mutex_trylock(&moving_mutex)) return S_ANS_MOVING;
     pthread_t m_thread;
+    if(ismoving) return S_ANS_MOVING;
     DBG("startmoving: %g", pos);
     sp = pos;
     if(pthread_create(&m_thread, NULL, move_focus, (void*) &sp)){
         WARN("pthread_create()");
-        pthread_mutex_unlock(&moving_mutex);
         return S_ANS_ERR;
     }else{
         DBG("Thread created, detouch");
@@ -174,16 +171,13 @@ static void *ego(_U_ void *unused){
     pthread_mutex_lock(&canbus_mutex);
     go_out_from_ESW();
     pthread_mutex_unlock(&canbus_mutex);
-    pthread_mutex_unlock(&moving_mutex);
     pthread_exit(NULL);
     return NULL;
 }
 static void getoutESW(){
-    pthread_mutex_lock(&moving_mutex);
     pthread_t m_thread;
     if(pthread_create(&m_thread, NULL, ego, NULL)){
         WARN("pthread_create()");
-        pthread_mutex_unlock(&moving_mutex);
     }else{
         DBG("Thread created, detouch");
         pthread_detach(m_thread); // don't care about thread state
@@ -193,6 +187,7 @@ static void getoutESW(){
 static void *handle_socket(void *asock){
 #define getparam(x)     (strncmp(found, x, sizeof(x)-1) == 0)
     int sock = *((int*)asock);
+    putlog("[DBG] handle_socket: run for client %d", sock);
     int webquery = 0; // whether query is web or regular
     char buff[BUFLEN];
     ssize_t rd;
@@ -240,21 +235,18 @@ static void *handle_socket(void *asock){
                         FOCMIN_MM, FOCMAX_MM, MINSPEED, MAXSPEED);
         }else if(getparam(S_CMD_STOP)){
             DBG("Stop request");
-            emerg_stop = TRUE;
             pthread_mutex_lock(&canbus_mutex);
-            pthread_mutex_lock(&moving_mutex);
+            emerg_stop = TRUE;
             if(stop()) sprintf(buff, S_ANS_ERR);
             else sprintf(buff, S_ANS_OK);
             emerg_stop = FALSE;
             putlog("%s: request to stop @ %.03f", peerIP, curPos());
-            pthread_mutex_unlock(&moving_mutex);
             pthread_mutex_unlock(&canbus_mutex);
         }else if(getparam(S_CMD_TARGSPEED)){
             char *ch = strchr(found, '=');
             double spd;
-            if(pthread_mutex_trylock(&moving_mutex)) sprintf(buff,  S_ANS_MOVING);
+            if(pthread_mutex_trylock(&canbus_mutex)) sprintf(buff,  S_ANS_MOVING);
             else{
-                pthread_mutex_lock(&canbus_mutex);
                 if(!ch || !str2double(&spd, ch+1) || fabs(spd) < MINSPEED || fabs(spd) > MAXSPEED || movewconstspeed(spd)) sprintf(buff, S_ANS_ERR);
                 else{
                     DBG("Move with constant speed %g request", spd);
@@ -262,7 +254,6 @@ static void *handle_socket(void *asock){
                     sprintf(buff, S_ANS_OK);
                 }
                 pthread_mutex_unlock(&canbus_mutex);
-                pthread_mutex_unlock(&moving_mutex);
             }
         }else if(getparam(S_CMD_GOTO)){
             char *ch = strchr(found, '=');
@@ -303,10 +294,12 @@ static void *handle_socket(void *asock){
             sprintf(buff, "%s", msg);
         }else sprintf(buff, S_ANS_ERR);
         if(!send_data(sock, webquery, buff)){
-            WARNX("can't send data to %s, some error occured", peerIP);
+            break;
+            //WARNX("can't send data to %s, some error occured", peerIP);
         }
     }
     FREE(peerIP);
+    putlog("[DBG] socket %d closed", sock);
     close(sock);
     pthread_exit(NULL);
     return NULL;
@@ -317,7 +310,7 @@ static void *handle_socket(void *asock){
 static void *server(void *asock){
     int sock = *((int*)asock);
     if(listen(sock, BACKLOG) == -1){
-        //WARN("listen() failed");
+        WARN("listen() failed");
         return NULL;
     }
     while(1){
@@ -327,13 +320,15 @@ static void *server(void *asock){
         int w = waittoread(sock);
         if(w == 0) continue;
         else if(w < 0) break;
+        putlog("[DBG] server(): try to accept()");
         newsock = accept(sock, (struct sockaddr*)&their_addr, &size);
         if(newsock <= 0){
-            WARN("accept() failed");
-            continue;
+            ERR("accept() failed");
+            break;
         }
-        struct sockaddr_in* pV4Addr = (struct sockaddr_in*)&their_addr;
-        struct in_addr ipAddr = pV4Addr->sin_addr;
+        addtolog("\t\taccept() OK. fd=%d", newsock);
+        struct sockaddr_in* ipV4Addr = (struct sockaddr_in*)&their_addr;
+        struct in_addr ipAddr = ipV4Addr->sin_addr;
         char str[INET_ADDRSTRLEN];
         inet_ntop(AF_INET, &ipAddr, str, INET_ADDRSTRLEN);
         //DBG("Got connection from %s", str);
@@ -345,26 +340,23 @@ static void *server(void *asock){
             pthread_detach(handler_thread); // don't care about thread state
         }
     }
-    putlog("UNREACHABLE CODE REACHED!");
+    putlog("server(): UNREACHABLE CODE REACHED!");
     return NULL;
 }
 
 // refresh file with focus value
 static void subst_file(char *name){
+    char aname[FILENAME_MAX];
     if(!name) return;
-    int l = strlen(name) + 7;
-    char *aname = MALLOC(char, l);
-    snprintf(aname, l, "%sXXXXXX", name);
+    snprintf(aname, FILENAME_MAX-1, "%sXXXXXX", name);
     int fd = mkstemp(aname);
-    if(fd < 0) goto ret;
+    if(fd < 0) return;
     fchmod(fd, 0644);
     FILE *f = fdopen(fd, "w");
-    if(!f) goto ret;
+    if(!f){ close(fd); return; }
     fprintf(f, "FOCUS   = %.3f\n", curPos());
     fclose(f);
     rename(aname, name);
-ret:
-    FREE(aname);
 }
 
 // data gathering & socket management
@@ -437,7 +429,7 @@ void daemonize(const char *port){
     }
     if(p == NULL){
         // looped off the end of the list with no successful bind
-        ERRX("failed to bind socket");
+        ERRX("daemonize(): failed to bind socket");
     }
     freeaddrinfo(res);
     DBG("going to run daemon_()");

@@ -16,14 +16,15 @@ int sendNMT(int node, int icode){
 }
 
 int resetNode2(int oldnode, int newnode){
-    int idr,dlen,ntout=50;
+    int dlen,ntout=50;
+    canid_t idr;
     unsigned char rdata[8];
     can_clean_recv(&rxpnt, &rxtime);
     if(!sendNMT(oldnode, 0x81)) return 0;
     for(int i=0; i < ntout; ++i){
         can_dsleep(0.01);
         while(can_recv_frame(&rxpnt, &rxtime, &idr, &dlen, rdata)){
-            if(idr == (0x700|newnode) && dlen==1 && rdata[0] == 0) return 1;
+            if(idr == (0x700|((canid_t)newnode)) && dlen==1 && rdata[0] == 0) return 1;
         }
     }
     return 0;
@@ -34,14 +35,15 @@ int resetNode(int node){return resetNode2(node,node);}
 int getNodeState(int node){
     /* use Node Guarding Protocol */
     unsigned long idt = (0x700 | (node&0x7f) | CAN_RTR_FLAG);
-    int idr = 0, dlen = 0, ntout = 15;
+    int dlen = 0, ntout = 15;
+    canid_t idr;
     unsigned char rdata[8];
     can_clean_recv(&rxpnt, &rxtime);
     if(can_send_frame(idt, dlen, rdata)<=0) return 0;
     for(int i=0; i < ntout; ++i){
         can_dsleep(0.01);
         while(can_recv_frame(&rxpnt, &rxtime, &idr, &dlen, rdata)) {
-            if(idr == (0x700|node) && dlen == 1) return rdata[0]&0x7f;
+            if(idr == (0x700|((canid_t)node)) && dlen == 1) return rdata[0]&0x7f;
         }
     }
     return 0;
@@ -95,12 +97,13 @@ int sendSDOreq(int node, int object, int subindex){
 
 int recvSDOresp(int node, int t_func, int t_object, int t_subindex, unsigned char data[]){
     int idt = 0x580|(node&0x7f);
-    int idr = 0, dlen = 0;
+    int dlen = 0;
+    canid_t idr;
     unsigned char rdata[8] = {0};
     int ntout = (t_object == 0x1010||t_object == 0x1011)? 50 : 15;
     for(int i = 0; i < ntout; ++i){
         can_dsleep(0.01);
-        while(can_recv_frame(&rxpnt, &rxtime, &idr, &dlen, rdata)) if(idr==idt){
+        while(can_recv_frame(&rxpnt, &rxtime, &idr, &dlen, rdata)) if(idr==(canid_t)idt){
             int r_func, r_object, r_subindex;
             if(dlen < 4){
                 fprintf(stderr,"Too short SDO response from Node%d\n",node&0x7f);
@@ -240,7 +243,8 @@ int recvNextPDO(double tout, int *node, unsigned long *value){
 // wait up to 'tout' sec. for the one next PDO
 // if ok - return 1 for PDO1 or 2 for PDO2; else 0 if timeout
     double te = can_dtime()+tout;
-    int idr=0, dlen=0, pdon = 0;
+    int dlen=0, pdon = 0;
+    canid_t idr;
     unsigned char rdata[8] = {0};
     do{
         while(can_recv_frame(&rxpnt, &rxtime, &idr, &dlen, rdata)){
@@ -262,7 +266,8 @@ int recvPDOs(double tout, int maxpdo, int node[], int pdo_n[], unsigned long val
 // wait up to 'tout' sec. for the array of 'maxpdo' PDOs
 // if ok - return number of PDO really received; else 0 if timeout
     double te = can_dtime()+tout;
-    int npdo=0, idr=0, dlen=0, pdon = 0;
+    int npdo=0, dlen=0, pdon = 0;
+    canid_t idr;
     unsigned char rdata[8] = {0};
     do{
         while(can_recv_frame(&rxpnt, &rxtime, &idr, &dlen, rdata)){

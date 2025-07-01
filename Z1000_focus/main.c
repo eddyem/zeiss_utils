@@ -48,6 +48,7 @@ int verbose(const char *fmt, ...){
 
 void signals(int signo){
     unlink_pidfile();
+    putlog("Get signal %d, exit", signo);
     can_exit(signo);
 }
 
@@ -92,11 +93,13 @@ int main (int argc, char *argv[]){
     can_dev[8] = '1';
 
     if(G->server){ // daemonize & run server
+    /*
 #ifndef EBUG
         if(daemon(1, 0)){
             ERR("daemon()");
         }
 #endif
+*/
         check4running(G->pidfilename);
 #ifndef EBUG
         while(1){ // guard for dead processes
